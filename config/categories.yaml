@@ -1,0 +1,11 @@
+device_types:
+  router:  {port_hints: [80, 443, 22, 23]}
+  camera:  {port_hints: [554, 80, 8080, 8554]}
+  printer: {port_hints: [515, 631, 9100]}
+  mobile:  {port_hints: [62078, 5223]}
+  iot:     {port_hints: [1883, 8883, 5683]}
+severity:
+  critical: {cvss_min: 9.0, color: "red"}
+  high:     {cvss_min: 7.0, color: "orange"}
+  medium:   {cvss_min: 4.0, color: "yellow"}
+  low:      {cvss_min: 0.1, color: "blue"}

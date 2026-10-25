@@ -1,0 +1,101 @@
+app:
+  title: Security Operations Platform
+  subtitle: Recon Orchestrator
+  version: Version
+menu:
+  phases_title: Seven Phases
+  commands_hint: 'Commands: 1-7 phase • t target • s scope • r status • l sessions • p platform • h help
+    • q quit'
+phase:
+  p1: Network Type Detection
+  p2: Discovery
+  p3: Target Selection
+  p4: Port Scan
+  p5: Vulnerability Scan
+  p6: Safe Exploitation
+  p7: Reporting
+  p1_running: Detecting network type (max 5s)
+  p2_running: Discovering devices on network
+  p3_running: Showing devices to select
+  p4_running: Scanning ports
+  p5_running: Scanning for CVEs
+  p6_running: Showing exploitation plans
+  p7_running: Generating report
+phase_desc:
+  p1: Detect captive portal, MITM, hotspot, classification
+  p2: ARP/NDP scan, OS fingerprint, device types
+  p3: Choose target, verify against scope.txt
+  p4: Quick/comprehensive/stealth/UDP/NSE profiles
+  p5: Nuclei/Nikto/Searchsploit/OpenVAS
+  p6: Review + confirm EXPLOIT + isolated run
+  p7: HTML report + timeline + remediation plan
+messages:
+  running: Running...
+  done: Done
+  saved: Saved to session
+  cancelled: Cancelled
+  error: Error
+  warning: Warning
+  no_data: No data — run earlier phases first
+  scanning: Scanning...
+  generating: Generating...
+platform:
+  title: Platform Detected
+  system: System
+  privilege: Privilege
+  capabilities: Capabilities
+  available: available
+  missing: missing
+  hint_root: 'To unlock all (SYN, UDP, OS): use Kali Linux'
+  standard_user: standard user
+  root_available: root available
+status:
+  target: Target
+  session: Session
+  platform: Platform
+  root: root
+  demo: Demo
+  unset: (unset)
+  none: none
+common:
+  true: 'yes'
+  false: 'no'
+  ok: OK
+  cancel: Cancel
+  save: Save
+  exit: Exit
+  back: Back
+  continue: Continue
+ui:
+  banner_subtitle: Security Operations Platform
+  menu_header: Seven Phases
+  status_title: Status
+  target_unset: (unset)
+  commands_help: 'Available commands:'
+  input_prompt: Choose
+  phase_prefix: Phase
+  scan_profiles: Scan Profiles
+  choose_profile: Choose profile
+  open_ports: Open Ports
+  vulnerabilities: Vulnerabilities
+  risk_summary: Risk Summary
+  target_selected: Target Selected
+  exploit_plans: Exploitation Plans
+  safety_gate: Safety Gate
+  confirm_exploit: Type EXPLOIT to confirm
+  report_ready: Report Ready
+  filename_prompt: Report filename
+  next_step: Next
+  results: Results
+  duration: Duration
+  saved: Saved to session
+  no_data: No data
+  running_probes: Running
+  type: Type
+  confidence: Confidence
+  gateway: Gateway
+  iface: Interface
+  local_ip: Local IP
+  safe_to_scan: Safe to scan
+  yes_word: 'yes'
+  no_word: 'no'

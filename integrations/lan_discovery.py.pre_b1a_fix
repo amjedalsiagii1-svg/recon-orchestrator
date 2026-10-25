@@ -1,0 +1,307 @@
+"""LAN discovery via mDNS, SSDP, NetBIOS — no root required.
+
+All three use UDP broadcast/multicast. Works on Termux and Kali without root.
+Combined results give a much richer picture than nmap -sn alone.
+"""
+from __future__ import annotations
+
+import asyncio
+import socket
+import struct
+from dataclasses import dataclass, field, asdict
+from typing import Any
+
+
+# Common mDNS service types to query (bilingual hints)
+MDNS_SERVICES = [
+    "_services._dns-sd._udp.local",   # Meta-query: all services
+    "_http._tcp.local",               # Web servers
+    "_https._tcp.local",              # HTTPS
+    "_printer._tcp.local",            # Printers
+    "_ipp._tcp.local",                # Internet Printing
+    "_ipps._tcp.local",               # IPPS
+    "_googlecast._tcp.local",         # Chromecast
+    "_airplay._tcp.local",            # AirPlay
+    "_raop._tcp.local",               # AirPlay audio
+    "_ssh._tcp.local",                # SSH
+    "_smb._tcp.local",                # Samba
+    "_workstation._tcp.local",        # Windows workstation
+    "_device-info._tcp.local",        # Apple device info
+]
+
+
+@dataclass
+class DiscoveredService:
+    """A LAN device discovered via broadcast."""
+    ip: str
+    source: str                           # mdns | ssdp | netbios
+    hostname: str | None = None
+    service: str | None = None
+    server: str | None = None
+    location: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def _build_mdns_query(name: bytes) -> bytes:
+    """Build minimal DNS-SD PTR query (multicast, no unicast response)."""
+    header = (
+        b"\x00\x00"      # transaction id
+        b"\x00\x00"      # flags (standard query)
+        b"\x00\x01"      # qdcount = 1
+        b"\x00\x00"      # ancount
+        b"\x00\x00"      # nscount
+        b"\x00\x00"      # arcount
+    )
+    qname = b""
+    for part in name.split(b"."):
+        if part:
+            qname += bytes([len(part)]) + part
+    qname += b"\x00"
+    qtype = struct.pack(">H", 12)   # PTR
+    qclass = struct.pack(">H", 1)   # IN (unicast bit = 0, so multicast response)
+    return header + qname + qtype + qclass
+
+
+async def mdns_discover(timeout: float = 4.0) -> list[DiscoveredService]:
+    """Send mDNS PTR queries for common services, collect responses."""
+    results: dict[str, DiscoveredService] = {}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        except Exception:
+            pass
+        sock.setblocking(False)
+        sock.bind(("0.0.0.0", 0))
+
+        mdns_addr = ("224.0.0.251", 5353)
+        for svc in MDNS_SERVICES:
+            try:
+                sock.sendto(_build_mdns_query(svc.encode()), mdns_addr)
+            except Exception:
+                pass
+
+        loop = asyncio.get_event_loop()
+        end = loop.time() + timeout
+        while loop.time() < end:
+            try:
+                data, addr = sock.recvfrom(4096)
+            except BlockingIOError:
+                await asyncio.sleep(0.1)
+                continue
+            except Exception:
+                break
+
+            ip = addr[0]
+            text = data.decode("latin-1", errors="ignore")
+
+            if ip not in results:
+                results[ip] = DiscoveredService(ip=ip, source="mdns")
+
+            entry = results[ip]
+
+            # Try to identify service type in response
+            for svc in MDNS_SERVICES:
+                if svc in text:
+                    entry.service = svc
+                    break
+
+            # Try to extract a .local hostname
+            for token in text.split():
+                token = token.strip(".,; ")
+                if ".local" in token.lower():
+                    candidate = token.split(".local")[0]
+                    candidate = "".join(c for c in candidate if c.isprintable())
+                    if 2 <= len(candidate) <= 64:
+                        entry.hostname = candidate
+                        break
+
+        sock.close()
+    except Exception:
+        pass
+    return list(results.values())
+
+
+async def ssdp_discover(timeout: float = 4.0) -> list[DiscoveredService]:
+    """M-SEARCH for ssdp:all — collect UPnP responses."""
+    results: dict[str, DiscoveredService] = {}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        except Exception:
+            pass
+        sock.setblocking(False)
+        sock.bind(("0.0.0.0", 0))
+
+        msg = (
+            "M-SEARCH * HTTP/1.1\r\n"
+            "HOST: 239.255.255.250:1900\r\n"
+            'MAN: "ssdp:discover"\r\n'
+            "MX: 2\r\n"
+            "ST: ssdp:all\r\n"
+            "\r\n"
+        ).encode()
+
+        ssdp_addr = ("239.255.255.250", 1900)
+        for _ in range(3):
+            try:
+                sock.sendto(msg, ssdp_addr)
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+
+        loop = asyncio.get_event_loop()
+        end = loop.time() + timeout
+        while loop.time() < end:
+            try:
+                data, addr = sock.recvfrom(8192)
+            except BlockingIOError:
+                await asyncio.sleep(0.1)
+                continue
+            except Exception:
+                break
+
+            ip = addr[0]
+            text = data.decode("utf-8", errors="ignore")
+            headers: dict[str, str] = {}
+            for line in text.split("\r\n"):
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    headers[k.strip().upper()] = v.strip()
+
+            if ip not in results:
+                results[ip] = DiscoveredService(ip=ip, source="ssdp")
+            entry = results[ip]
+            entry.server = headers.get("SERVER") or entry.server
+            entry.location = headers.get("LOCATION") or entry.location
+            st = headers.get("ST") or headers.get("USN")
+            if st:
+                entry.service = st
+
+            # Try to extract friendly name from LOCATION (optional; skip for speed)
+
+        sock.close()
+    except Exception:
+        pass
+    return list(results.values())
+
+
+def _extract_netbios_name(data: bytes) -> str | None:
+    """Best-effort: extract first readable NetBIOS name from response."""
+    try:
+        for i in range(len(data) - 15):
+            chunk = data[i:i + 15]
+            if not all(32 <= b < 127 or b == 0 for b in chunk):
+                continue
+            name = chunk.rstrip(b" \x00").decode("ascii", errors="ignore").strip()
+            if 3 <= len(name) <= 15 and all(c.isprintable() for c in name):
+                return name
+    except Exception:
+        pass
+    return None
+
+
+async def netbios_discover(timeout: float = 3.0) -> list[DiscoveredService]:
+    """Broadcast NBNS wildcard query for NetBIOS name discovery."""
+    results: dict[str, DiscoveredService] = {}
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        except Exception:
+            pass
+        sock.setblocking(False)
+        sock.bind(("0.0.0.0", 0))
+
+        # NBNS wildcard name query for '*'
+        # '*\0' encoded first level = "CK" + 'A'*30
+        qname_encoded = b"\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00"
+        header = (
+            b"\x12\x34"     # transaction id
+            b"\x00\x00"     # flags: standard query
+            b"\x00\x01"     # qdcount
+            b"\x00\x00"     # ancount
+            b"\x00\x00"     # nscount
+            b"\x00\x00"     # arcount
+        )
+        qtype = b"\x00\x21"      # NBSTAT
+        qclass = b"\x00\x01"     # IN
+        packet = header + qname_encoded + qtype + qclass
+
+        broadcast_addr = ("255.255.255.255", 137)
+        try:
+            sock.sendto(packet, broadcast_addr)
+        except Exception:
+            pass
+
+        loop = asyncio.get_event_loop()
+        end = loop.time() + timeout
+        while loop.time() < end:
+            try:
+                data, addr = sock.recvfrom(4096)
+            except BlockingIOError:
+                await asyncio.sleep(0.1)
+                continue
+            except Exception:
+                break
+
+            ip = addr[0]
+            if ip in results:
+                continue
+            hostname = _extract_netbios_name(data)
+            results[ip] = DiscoveredService(ip=ip, source="netbios", hostname=hostname)
+
+        sock.close()
+    except Exception:
+        pass
+    return list(results.values())
+
+
+async def lan_discover_all(timeout: float = 4.0) -> list[DiscoveredService]:
+    """Run all three protocols in parallel and merge results."""
+    try:
+        batches = await asyncio.gather(
+            mdns_discover(timeout),
+            ssdp_discover(timeout),
+            netbios_discover(timeout),
+            return_exceptions=True,
+        )
+    except Exception:
+        return []
+
+    merged: dict[str, DiscoveredService] = {}
+    for batch in batches:
+        if isinstance(batch, Exception) or not isinstance(batch, list):
+            continue
+        for d in batch:
+            if d.ip not in merged:
+                merged[d.ip] = d
+                merged[d.ip].raw["sources"] = [d.source]
+            else:
+                cur = merged[d.ip]
+                if not cur.hostname and d.hostname:
+                    cur.hostname = d.hostname
+                if not cur.server and d.server:
+                    cur.server = d.server
+                if not cur.service and d.service:
+                    cur.service = d.service
+                if d.source not in cur.raw.get("sources", []):
+                    cur.raw.setdefault("sources", []).append(d.source)
+
+    return list(merged.values())
+
+
+def discover_sync(timeout: float = 4.0) -> list[dict[str, Any]]:
+    """Synchronous wrapper for CLI/tests."""
+    try:
+        results = asyncio.run(lan_discover_all(timeout=timeout))
+        return [r.to_dict() for r in results]
+    except Exception:
+        return []

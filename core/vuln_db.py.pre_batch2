@@ -1,0 +1,208 @@
+"""Built-in CVE fingerprints for known vulnerable product versions.
+
+Offline — works on Termux without any network or searchsploit.
+Every entry has: id (CVE), affected range, cvss, desc, impact, remediation,
+famous flag (widely exploited in the wild).
+"""
+from __future__ import annotations
+
+import re
+from typing import Any
+
+
+VULN_DB: dict[str, list[dict[str, Any]]] = {
+    "dnsmasq": [
+        {"id": "CVE-2017-14491", "cvss": 9.8, "min": "0.0", "max": "2.77",
+         "desc": "DNS heap overflow — remote code execution",
+         "impact": "Full RCE on router", "famous": True,
+         "remediation": "Upgrade dnsmasq to 2.78+"},
+        {"id": "CVE-2017-14492", "cvss": 9.8, "min": "0.0", "max": "2.77",
+         "desc": "DHCPv6 heap overflow — RCE",
+         "impact": "RCE via DHCPv6", "famous": True,
+         "remediation": "Upgrade to 2.78+"},
+        {"id": "CVE-2017-14493", "cvss": 9.8, "min": "0.0", "max": "2.77",
+         "desc": "DHCPv6 stack overflow — RCE",
+         "impact": "RCE via DHCPv6", "famous": False,
+         "remediation": "Upgrade to 2.78+"},
+        {"id": "CVE-2017-14494", "cvss": 6.5, "min": "0.0", "max": "2.77",
+         "desc": "DHCPv6 info disclosure",
+         "impact": "Memory leak", "famous": False,
+         "remediation": "Upgrade to 2.78+"},
+        {"id": "CVE-2017-14495", "cvss": 7.5, "min": "0.0", "max": "2.77",
+         "desc": "DHCPv6 memory exhaustion",
+         "impact": "DoS", "famous": False,
+         "remediation": "Upgrade to 2.78+"},
+        {"id": "CVE-2017-14496", "cvss": 7.5, "min": "0.0", "max": "2.77",
+         "desc": "DHCPv6 denial of service",
+         "impact": "DoS", "famous": False,
+         "remediation": "Upgrade to 2.78+"},
+    ],
+    "lighttpd": [
+        {"id": "CVE-2022-22707", "cvss": 5.3, "min": "1.4.46", "max": "1.4.63",
+         "desc": "Out-of-bounds read in mod_extforward",
+         "impact": "Information disclosure",
+         "famous": False,
+         "remediation": "Upgrade lighttpd to 1.4.64+"},
+    ],
+    "apache": [
+        {"id": "CVE-2021-41773", "cvss": 9.8, "min": "2.4.49", "max": "2.4.49",
+         "desc": "Path traversal & RCE (mod_cgi)",
+         "impact": "RCE if mod_cgi enabled",
+         "famous": True,
+         "remediation": "Upgrade Apache to 2.4.51+"},
+        {"id": "CVE-2021-42013", "cvss": 9.8, "min": "2.4.50", "max": "2.4.50",
+         "desc": "Bypass of CVE-2021-41773 fix",
+         "impact": "RCE", "famous": True,
+         "remediation": "Upgrade to 2.4.51+"},
+    ],
+    "openssh": [
+        {"id": "CVE-2021-41617", "cvss": 7.0, "min": "6.2", "max": "8.7",
+         "desc": "Privilege escalation via AuthorizedKeysCommand",
+         "impact": "Local privilege escalation",
+         "famous": False,
+         "remediation": "Upgrade OpenSSH to 8.8+"},
+        {"id": "CVE-2020-14145", "cvss": 5.9, "min": "5.5", "max": "8.8",
+         "desc": "Client-side user enumeration via algorithm negotiation",
+         "impact": "Info disclosure",
+         "famous": False,
+         "remediation": "Upgrade OpenSSH or restrict"},
+    ],
+    "vsftpd": [
+        {"id": "CVE-2011-2523", "cvss": 9.8, "min": "2.3.4", "max": "2.3.4",
+         "desc": "Backdoor in source distribution",
+         "impact": "Full RCE on port 6200",
+         "famous": True,
+         "remediation": "Upgrade to 2.3.5+ (or any non-backdoored build)"},
+    ],
+    "samba": [
+        {"id": "CVE-2007-2447", "cvss": 10.0, "min": "3.0.0", "max": "3.0.20",
+         "desc": "Username map script command injection",
+         "impact": "Unauthenticated RCE",
+         "famous": True,
+         "remediation": "Upgrade Samba"},
+    ],
+    "openssl": [
+        {"id": "CVE-2014-0160", "cvss": 7.5, "min": "1.0.1", "max": "1.0.1f",
+         "desc": "Heartbleed — memory leak over TLS heartbeat",
+         "impact": "Private key / session leak",
+         "famous": True,
+         "remediation": "Upgrade OpenSSL to 1.0.1g+ and rotate keys"},
+    ],
+    "proftpd": [
+        {"id": "CVE-2010-4221", "cvss": 10.0, "min": "1.3.3c", "max": "1.3.3c",
+         "desc": "Stack buffer overflow in mod_sql",
+         "impact": "Unauthenticated RCE", "famous": False,
+         "remediation": "Upgrade ProFTPD to 1.3.4+"},
+    ],
+    "mikrotik": [
+        {"id": "CVE-2018-14847", "cvss": 9.1, "min": "0.0", "max": "6.38.4",
+         "desc": "Winbox unauth file read (credentials)",
+         "impact": "Admin credential leak → full takeover",
+         "famous": True,
+         "remediation": "Upgrade RouterOS to 6.38.5+ / disable Winbox on WAN"},
+    ],
+    "routeros": [
+        {"id": "CVE-2018-14847", "cvss": 9.1, "min": "0.0", "max": "6.38.4",
+         "desc": "Winbox unauth file read (credentials)",
+         "impact": "Admin credential leak",
+         "famous": True,
+         "remediation": "Upgrade to 6.38.5+"},
+    ],
+    "huawei hg532": [
+        {"id": "CVE-2017-17215", "cvss": 8.8, "min": "0.0", "max": "999.0",
+         "desc": "Command injection in UPnP (port 37215)",
+         "impact": "Root RCE on the router",
+         "famous": True,
+         "remediation": "Patch firmware or disable UPnP"},
+    ],
+    "dlink": [
+        {"id": "CVE-2016-10372", "cvss": 9.8, "min": "0.0", "max": "999.0",
+         "desc": "Command injection in TR-069 (port 7547)",
+         "impact": "RCE", "famous": True,
+         "remediation": "Patch firmware or block port 7547"},
+    ],
+    "netgear": [
+        {"id": "CVE-2017-6077", "cvss": 9.8, "min": "0.0", "max": "999.0",
+         "desc": "Command injection in web admin",
+         "impact": "RCE", "famous": True,
+         "remediation": "Update firmware"},
+    ],
+    "boa": [
+        {"id": "CVE-2017-9833", "cvss": 7.5, "min": "0.0", "max": "0.94.14",
+         "desc": "Path traversal in Boa web server",
+         "impact": "Arbitrary file read", "famous": False,
+         "remediation": "Upgrade or replace Boa"},
+    ],
+}
+
+
+def _parse_version(v: str | None) -> tuple[int, ...]:
+    if not v:
+        return ()
+    parts = re.findall(r"\d+", str(v))
+    return tuple(int(p) for p in parts)
+
+
+def _version_in_range(version: str | None, min_v: str, max_v: str) -> bool:
+    if not version:
+        return False
+    v = _parse_version(version)
+    if not v:
+        return False
+    mn = _parse_version(min_v)
+    mx = _parse_version(max_v)
+    if mn and v < mn:
+        return False
+    if mx and v > mx:
+        return False
+    return True
+
+
+def _normalize(text: str | None) -> str:
+    if not text:
+        return ""
+    return text.lower().replace("_", " ").replace("-", " ").strip()
+
+
+def lookup(product: str | None, version: str | None) -> list[dict[str, Any]]:
+    """Return matching CVEs for a product+version pair."""
+    if not product:
+        return []
+    p = _normalize(product)
+    matches: list[dict[str, Any]] = []
+
+    # Try exact key, then substring key
+    candidate_keys = []
+    if p in VULN_DB:
+        candidate_keys.append(p)
+    else:
+        for key in VULN_DB:
+            if key in p or p in key:
+                candidate_keys.append(key)
+
+    for key in candidate_keys:
+        for entry in VULN_DB[key]:
+            if _version_in_range(version, entry["min"], entry["max"]):
+                matches.append({
+                    "id": entry["id"],
+                    "cvss": entry["cvss"],
+                    "desc": entry["desc"],
+                    "impact": entry["impact"],
+                    "remediation": entry["remediation"],
+                    "famous": entry["famous"],
+                    "matched_product": product,
+                    "matched_version": version or "unknown",
+                })
+    return matches
+
+
+def severity_from_cvss(cvss: float) -> str:
+    if cvss >= 9.0:
+        return "critical"
+    if cvss >= 7.0:
+        return "high"
+    if cvss >= 4.0:
+        return "medium"
+    if cvss > 0.0:
+        return "low"
+    return "info"

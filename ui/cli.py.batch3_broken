@@ -1,0 +1,1180 @@
+"""Rich-based interactive CLI — Termux-safe fallback for Textual TUI."""
+from __future__ import annotations
+
+import sys
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+from core.privilege import detect as detect_priv
+from core.scope import Scope
+from core.session import Session
+
+
+PHASES = [
+    ("p1", "Network Type Detection", "Detect captive portal, MITM, hotspot, classification"),
+    ("p2", "Discovery", "ARP/NDP scan, OS fingerprint, device types"),
+    ("p3", "Target Selection", "Choose target, verify against scope.txt"),
+    ("p4", "Port Scan", "Quick/full/stealth/UDP/NSE profiles"),
+    ("p5", "Vulnerability Scan", "Nuclei/Nikto/Searchsploit/OpenVAS"),
+    ("p6", "Safe Exploitation", "Review + confirm EXPLOIT + isolated run"),
+    ("p7", "Reporting", "HTML report + timeline + remediation plan"),
+]
+
+
+class CLI:
+    """Interactive CLI orchestrator."""
+
+    def __init__(self, demo: bool = False, session_id: str | None = None) -> None:
+        self.demo = demo
+        self.console = Console()
+        self.session: Session | None = None
+        self.scope: Scope | None = None
+        self.target: str | None = None
+        self._resume_id = session_id
+
+    # ---------- lifecycle ----------
+    async def start(self) -> None:
+        self._banner()
+        self._show_platform_brief()
+        self._load_scope()
+        await self._open_session()
+        self._status()
+        await self._main_loop()
+
+    def _banner(self) -> None:
+        self.console.print(
+            Panel.fit(
+                "[bold cyan]RECON ORCHESTRATOR[/bold cyan]  [dim]v0.4.0[/dim]\n"
+                "[dim]Security Operations Platform — CLI edition[/dim]",
+                border_style="cyan",
+            )
+        )
+
+    def _show_platform_brief(self) -> None:
+        """Show platform + capabilities (bilingual, compact)."""
+        try:
+            from core import platform as _plat
+            from core import capabilities as _caps
+            plat = _plat.get()
+            caps = _caps.get()
+        except Exception:
+            return
+
+        try:
+            self.console.print()
+            self.console.print(f"[bold cyan]النظام: {plat.label}[/bold cyan]")
+            self.console.print(f"[dim]System: {plat.label}[/dim]")
+
+            priv_ar = "root متاح" if caps.can_elevate else "مستخدم عادي"
+            priv_en = "root available" if caps.can_elevate else "standard user"
+            self.console.print(f"[bold cyan]الصلاحيات: {priv_ar}[/bold cyan]")
+            self.console.print(f"[dim]Privilege: {priv_en}[/dim]")
+
+            caps_line = f"{caps.available_count}/{caps.total_count}"
+            self.console.print(f"[bold cyan]القدرات المتاحة: {caps_line}[/bold cyan]")
+            self.console.print(f"[dim]Capabilities: {caps_line}[/dim]")
+
+            if not caps.can_elevate:
+                self.console.print()
+                self.console.print(
+                    "[yellow]⚠ لفتح كل القدرات (SYN, UDP, OS): استخدم Kali Linux[/yellow]"
+                )
+                self.console.print(
+                    "[dim]⚠ To unlock all (SYN, UDP, OS): use Kali Linux[/dim]"
+                )
+            self.console.print()
+        except Exception:
+            pass
+
+    async def _show_platform_detail(self) -> None:
+        """Show detailed platform + capabilities (p command)."""
+        try:
+            from core import platform as _plat
+            from core import capabilities as _caps
+            plat = _plat.get()
+            caps = _caps.get()
+        except Exception:
+            self.console.print("[red]Platform detection unavailable[/red]")
+            return
+
+        table = Table(title="النظام / System", border_style="cyan")
+        table.add_column("Key", style="bold")
+        table.add_column("Value")
+        table.add_row("Platform", plat.label)
+        table.add_row("Python", plat.python_version)
+        table.add_row("Kernel", plat.kernel)
+        table.add_row("Arch", plat.arch)
+        table.add_row("root", "yes" if caps.root else "no")
+        table.add_row("sudo", "yes" if caps.sudo else "no")
+        table.add_row("elevate", "yes" if caps.can_elevate else "no")
+        self.console.print(table)
+
+        cap_table = Table(title="القدرات / Capabilities", border_style="cyan")
+        cap_table.add_column("Feature", style="bold")
+        cap_table.add_column("Status", justify="center")
+        cap_table.add_column("Notes")
+
+        def _row(name: str, ok: bool, note: str = "") -> None:
+            mark = "[green]✅[/green]" if ok else "[red]❌[/red]"
+            cap_table.add_row(name, mark, note)
+
+        _row("TCP connect scan", caps.nmap, "always available on nmap")
+        _row("SYN scan (-sS)", caps.syn_scan, "requires root/sudo")
+        _row("UDP scan (-sU)", caps.udp_scan, "requires root/sudo")
+        _row("OS detection (-O)", caps.os_detection, "requires root/sudo")
+        _row("ARP scan", caps.arp_scan, "requires root + arp-scan")
+        _row("Packet capture", caps.packet_capture, "requires root + tcpdump")
+        _row("nuclei", caps.nuclei, "")
+        _row("searchsploit", caps.searchsploit, "Kali only usually")
+        _row("msfconsole", caps.msfconsole, "Kali only usually")
+        _row("Textual TUI", caps.textual_tui, "Kali only (BiDi)")
+        _row("PDF reports", caps.pdf, "requires weasyprint")
+        _row("Web UI (Flask)", caps.web, "always")
+        _row("CLI (Rich)", caps.cli, "always")
+        self.console.print(cap_table)
+
+        if caps.missing_features():
+            self.console.print()
+            self.console.print(
+                f"[yellow]الميزات غير المتاحة: {', '.join(caps.missing_features())}[/yellow]"
+            )
+            self.console.print(
+                f"[dim]Missing: {', '.join(caps.missing_features())}[/dim]"
+            )
+        self.console.print()
+
+    def _load_scope(self) -> None:
+        try:
+            self.scope = Scope()
+            self.console.print(f"[green]Scope loaded:[/green] {self.scope!r}")
+        except Exception as e:
+            self.console.print(f"[red]Scope error:[/red] {e}")
+            self.scope = None
+
+    async def _open_session(self) -> None:
+        try:
+            self.session = await Session.open("data/sessions.db")
+            if self._resume_id:
+                row = await self.session.get(self._resume_id)
+                if not row:
+                    self.console.print(
+                        f"[red]Session not found:[/red] {self._resume_id}"
+                    )
+                    self._resume_id = None
+                else:
+                    self.session.id = self._resume_id
+                    # Load stored target so P3/P4/P5 reuse it
+                    if row.get("target"):
+                        self.target = row["target"]
+                    self.console.print(
+                        f"[green]Resumed session:[/green] {self._resume_id}"
+                        + (f"  target={self.target}" if self.target else "")
+                    )
+            if not self.session.id:
+                sid = await self.session.create("cli-session")
+                self.console.print(f"[green]Session:[/green] {sid}")
+        except Exception as e:
+            self.console.print(f"[red]Session error:[/red] {e}")
+
+    def _status(self) -> None:
+        priv = detect_priv()
+        t = Table.grid(padding=(0, 2))
+        t.add_column(style="bold")
+        t.add_column()
+        t.add_row("Target:", self.target or "[dim](unset)[/dim]")
+        t.add_row("Session:", self.session.id if self.session else "[red]none[/red]")
+        try:
+            from core import platform as _plat
+            _plat_label = _plat.get().label
+        except Exception:
+            _plat_label = "Unknown"
+        t.add_row("Platform:", _plat_label)
+        t.add_row("Privilege:", priv.summary)
+        t.add_row("Demo:", "yes" if self.demo else "no")
+        self.console.print(Panel(t, title="Status", border_style="blue"))
+
+    # ---------- main loop ----------
+    async def _main_loop(self) -> None:
+        while True:
+            self._menu()
+            try:
+                choice = input("\n> ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                self.console.print("\n[dim]bye[/dim]")
+                break
+            if not choice:
+                continue
+            if choice in ("q", "quit", "exit"):
+                break
+            if choice in ("h", "help", "?"):
+                self._help()
+                continue
+            if choice in ("r", "refresh", "status"):
+                self._status()
+                continue
+            if choice in ("s", "scope"):
+                self._show_scope()
+                continue
+            if choice in ("p", "platform"):
+                await self._show_platform_detail()
+                continue
+            if choice in ("l", "ls", "sessions"):
+                await self._list_sessions()
+                continue
+            if choice in ("t", "target"):
+                self._set_target_interactive()
+                continue
+            if choice.isdigit() and 1 <= int(choice) <= 7:
+                await self._run_phase(int(choice))
+                continue
+            self.console.print("[yellow]Unknown choice. Press H for help.[/yellow]")
+        await self._close()
+
+    def _menu(self) -> None:
+        table = Table(title="Phases", show_lines=False, border_style="cyan")
+        table.add_column("#", style="bold cyan", width=3)
+        table.add_column("Phase", style="bold")
+        table.add_column("Description", style="dim")
+        for i, (pid, name, desc) in enumerate(PHASES, start=1):
+            table.add_row(str(i), name, desc)
+        self.console.print(table)
+        self.console.print(
+            "[dim]Commands:[/dim] [bold]1-7[/bold] run phase  •  "
+            "[bold]t[/bold] target  •  [bold]s[/bold] scope  •  "
+            "[bold]r[/bold] status  •  [bold]l[/bold] sessions  •  [bold]h[/bold] help  •  [bold]q[/bold] quit"
+        )
+
+    def _help(self) -> None:
+        self.console.print(
+            Panel(
+                "[bold]How to use[/bold]\n"
+                "• Type a number 1-7 and press Enter to open that phase.\n"
+                "• Type [bold]t[/bold] to set the target (must be in scope.txt).\n"
+                "• Type [bold]s[/bold] to view the loaded scope.\n"
+                "• Type [bold]r[/bold] to refresh status.\n"
+                "• Type [bold]q[/bold] to quit.\n\n"
+                "[dim]On Termux, this CLI works with the normal on-screen keyboard.\n"
+                "If you prefer the Textual TUI, use a hardware keyboard or SSH.[/dim]",
+                title="Help",
+                border_style="green",
+            )
+        )
+
+    def _show_scope(self) -> None:
+        if not self.scope:
+            self.console.print("[red]No scope loaded[/red]")
+            return
+        try:
+            raw = self.scope.path.read_text(encoding="utf-8")
+        except Exception as e:
+            self.console.print(f"[red]Cannot read scope: {e}[/red]")
+            return
+        self.console.print(Panel(raw, title=str(self.scope.path), border_style="green"))
+
+    def _set_target_interactive(self) -> None:
+        try:
+            val = input("Target (IP/CIDR/hostname): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not val:
+            return
+        if self.scope and not self.scope.is_allowed(val):
+            self.console.print(f"[red]REJECTED:[/red] '{val}' is not in scope.txt")
+            return
+        self.target = val
+        if self.session:
+            try:
+                import asyncio
+                asyncio.get_event_loop().create_task(self.session.set_target(val))
+            except Exception:
+                pass
+        self.console.print(f"[green]Target set:[/green] {val}")
+
+    async def _run_phase(self, n: int) -> None:
+        pid, name, _ = PHASES[n - 1]
+        self.console.print(f"\n[bold cyan]→ Phase {n}: {name}[/bold cyan]")
+
+        if self.demo:
+            self.console.print("[yellow]Demo mode — phase not executed.[/yellow]")
+            return
+
+        try:
+            if n == 1:
+                await self._phase1()
+            elif n == 2:
+                await self._phase2()
+            elif n == 3:
+                await self._phase3()
+            elif n == 4:
+                await self._phase4()
+            elif n == 5:
+                await self._phase5()
+            elif n == 6:
+                await self._phase6()
+            elif n == 7:
+                await self._phase7()
+            else:
+                self.console.print(
+                    f"[yellow]Phase {n} not wired yet.[/yellow] "
+                    "[dim]Coming in next steps.[/dim]"
+                )
+        except Exception as e:
+            self.console.print(f"[red]Error:[/red] {e}")
+
+    async def _phase1(self) -> None:
+        """Run network type detection (real)."""
+        from phases.p1_network_type import detect as detect_p1
+        self.console.print("[bold cyan]المرحلة 1 — كشف نوع الشبكة[/bold cyan]")
+        self.console.print("[dim]Phase 1 — Network Type Detection[/dim]")
+        self.console.print()
+        self.console.print("[bold cyan]جارٍ الفحص (حد أقصى 5 ثوانٍ)...[/bold cyan]")
+        self.console.print("[dim]Running probes... (max 5s)[/dim]")
+        result = await detect_p1(timeout=3.0)
+
+        net = result.network
+        cap = result.captive
+        tls = result.tls
+        cls = result.classification
+
+        # Network info table
+        info = Table(title="Network Info", border_style="cyan", show_header=False)
+        info.add_column("Key", style="bold")
+        info.add_column("Value")
+        info.add_row("Local IPs", ", ".join(net.local_ips) or "(none)")
+        info.add_row("Gateway", net.default_gateway or "(unknown)")
+        info.add_row("Interface", net.default_iface or "(unknown)")
+        self.console.print(info)
+
+        # Probes table
+        probes = Table(title="Probes", border_style="cyan", show_header=True)
+        probes.add_column("Check")
+        probes.add_column("Result")
+        probes.add_row(
+            "Captive portal",
+            f"status={cap.status} redirect={cap.redirected}"
+            + (f" loc={cap.location}" if cap.location else "")
+            + (f" err={cap.error}" if cap.error else ""),
+        )
+        probes.add_row(
+            "TLS issuer",
+            (tls.issuer_cn or tls.error or "unknown")
+            + (" [red](suspicious)[/red]" if tls.is_suspicious else ""),
+        )
+        probes.add_row("DNS", "OK" if result.dns_ok else "[red]FAIL[/red]")
+        self.console.print(probes)
+
+        # Classification — bilingual header
+        self.console.print()
+        self.console.print("[bold cyan]النتيجة / Result:[/bold cyan]")
+
+        # Classification
+        color = {
+            "hotspot": "yellow",
+            "commercial": "magenta",
+            "home_router": "green",
+            "unknown": "white",
+        }.get(cls.type, "white")
+        self.console.print(
+            Panel(
+                f"[bold cyan]النوع:[/bold cyan] {cls.type}\n"
+                f"Type: {cls.type}\n\n"
+                f"[bold cyan]الثقة:[/bold cyan] {cls.confidence}\n"
+                f"Confidence: {cls.confidence}\n\n"
+                f"[bold cyan]الأسباب:[/bold cyan]\n  • "
+                + "\n  • ".join(cls.reasons or ["(none)"]),
+                title="التصنيف / Classification",
+                border_style=color,
+            )
+        )
+
+        # Persist to session
+        if self.session:
+            try:
+                await self.session.set_phase("p1", result.to_dict())
+                await self.session.log_event(
+                    "p1", "info", f"classification={cls.type}", result.to_dict()
+                )
+                self.console.print("[dim]تم الحفظ في الجلسة / Saved to session[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+    async def _phase2(self) -> None:
+        """Discovery — scan local subnet, enumerate devices."""
+        import json
+        from phases.p2_discovery import discover
+        from phases.p1_network_type import _local_ips, _read_proc_route
+
+        # Determine subnet
+        ips = _local_ips()
+        if not ips:
+            self.console.print("[red]No local IP detected[/red]")
+            return
+        try:
+            parts = ips[0].split(".")
+            subnet = ".".join(parts[:3] + ["0"]) + "/24"
+        except Exception:
+            self.console.print(f"[red]Cannot parse IP: {ips[0]}[/red]")
+            return
+
+        # Determine gateway (cached P1 or re-detect)
+        gateway = None
+        if self.session:
+            p1 = await self.session.get_phase_data("p1")
+            if p1:
+                gateway = (p1.get("network") or {}).get("default_gateway")
+        if not gateway:
+            gateway, _iface = _read_proc_route()
+
+        self.console.print(
+            f"[dim]Discovering {subnet} (gateway={gateway})... max 90s[/dim]"
+        )
+
+        result = await discover(subnet, scope=self.scope, gateway=gateway, timeout=90)
+
+        if result.error:
+            self.console.print(f"[red]Discovery error:[/red] {result.error}")
+            if "authorized" in result.error.lower():
+                self.console.print(
+                    f"[yellow]Add your subnet to config/scope.txt first:\n"
+                    f"  echo '{subnet}' >> config/scope.txt[/yellow]"
+                )
+            return
+
+        # Table
+        table = Table(
+            title=f"Devices ({len(result.devices)}) — method: {result.scan_method}",
+            border_style="cyan",
+            show_header=True,
+        )
+        table.add_column("IP", style="bold")
+        table.add_column("MAC")
+        table.add_column("Vendor")
+        table.add_column("Hostname")
+        table.add_column("Type", style="cyan")
+        for d in result.devices:
+            marker = "→" if d.is_gateway else " "
+            table.add_row(
+                f"{marker} {d.ip}",
+                d.mac or "-",
+                d.vendor or "-",
+                d.hostname or "-",
+                d.device_type,
+            )
+        self.console.print(table)
+        self.console.print(
+            f"[dim]Duration: {result.duration_seconds}s[/dim]"
+        )
+
+        # Save
+        if self.session:
+            try:
+                await self.session.set_phase("p2", result.to_dict())
+                await self.session.log_event(
+                    "p2", "info", f"{len(result.devices)} devices discovered",
+                    result.to_dict(),
+                )
+                self.console.print("[dim]تم الحفظ في الجلسة / Saved to session[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+
+    async def _phase3(self) -> None:
+        """Choose a target from discovered devices + re-verify scope."""
+        import json
+        from phases.p3_target_select import select_target
+        from core.scope import ScopeError
+
+        if not self.session:
+            self.console.print("[red]No active session[/red]")
+            return
+        p2 = await self.session.get_phase_data("p2")
+        if not p2:
+            self.console.print(
+                "[yellow]No discovery data. Run Phase 2 first.[/yellow]"
+            )
+            return
+        devices = p2.get("devices") or []
+        if not devices:
+            self.console.print("[yellow]Discovery returned no devices.[/yellow]")
+            return
+
+        table = Table(title="Discovered devices", border_style="cyan")
+        table.add_column("#", style="bold cyan", width=3)
+        table.add_column("IP")
+        table.add_column("Type")
+        table.add_column("Hostname")
+        table.add_column("Vendor")
+        for i, d in enumerate(devices, start=1):
+            table.add_row(
+                str(i),
+                d.get("ip", "-"),
+                d.get("device_type", "unknown"),
+                d.get("hostname") or "-",
+                d.get("vendor") or "-",
+            )
+        self.console.print(table)
+
+        try:
+            raw = input("Select target (# or IP, Enter to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not raw:
+            return
+
+        if raw.isdigit():
+            idx = int(raw)
+            if not (1 <= idx <= len(devices)):
+                self.console.print("[red]Invalid index[/red]")
+                return
+            ip = devices[idx - 1].get("ip")
+        else:
+            ip = raw
+
+        scope = self.scope or Scope()
+        try:
+            target = select_target(ip, devices, scope)
+        except ScopeError as e:
+            self.console.print(f"[red]REJECTED:[/red] {e}")
+            return
+        except ValueError as e:
+            self.console.print(f"[red]Invalid:[/red] {e}")
+            return
+
+        self.console.print(
+            Panel(
+                f"[bold]{target.ip}[/bold]  ({target.device_type})"
+                + ("  [yellow]← GATEWAY[/yellow]" if target.is_gateway else "")
+                + f"\n"
+                f"MAC:      {target.mac or '-'}\n"
+                f"Vendor:   {target.vendor or '-'}\n"
+                f"Hostname: {target.hostname or '-'}\n"
+                f"In scope: [green]yes[/green]\n\n"
+                f"[bold cyan]Recommended next steps:[/bold cyan]\n"
+                + "\n".join(f"  • {r}" for r in target.recommended_next),
+                title="Target Selected",
+                border_style="green",
+            )
+        )
+
+        self.target = target.ip
+        try:
+            await self.session.set_target(target.ip)
+            await self.session.set_phase("p3", target.to_dict())
+            await self.session.log_event(
+                "p3", "info", f"target={target.ip}", target.to_dict()
+            )
+            self.console.print("[dim]Target saved to session.[/dim]")
+        except Exception as e:
+            self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+    async def _phase4(self) -> None:
+        """Port scan with profile selection + risk summary."""
+        from phases.p4_port_scan import PROFILES, scan
+        from core.scope import Scope
+
+        # --- 1) Determine target ---
+        target = self.target
+        if not target and self.session:
+            p3 = await self.session.get_phase_data("p3")
+            if p3:
+                target = p3.get("ip")
+        if not target:
+            self.console.print(
+                "[yellow]No target selected. Run Phase 3 or enter IP.[/yellow]"
+            )
+            try:
+                raw = input("Target IP (Enter to cancel): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if not raw:
+                return
+            target = raw
+
+        scope = self.scope or Scope()
+        try:
+            scope.require_allowed(target)
+        except Exception as e:
+            self.console.print(f"[red]REJECTED:[/red] {e}")
+            return
+
+        self.console.print(f"[bold]Target:[/bold] {target}")
+        self.console.print()
+
+        # --- 2) Profile menu ---
+        table = Table(title="Scan Profiles", border_style="cyan")
+        table.add_column("#", style="bold cyan", width=3)
+        table.add_column("Profile", style="bold")
+        table.add_column("Description")
+        table.add_column("Estimated")
+        profiles_list = list(PROFILES.keys())
+        for i, name in enumerate(profiles_list, start=1):
+            meta = PROFILES[name]
+            table.add_row(str(i), name, meta["description"], meta["estimated"])
+        self.console.print(table)
+
+        try:
+            choice = input(
+                f"Choose profile [1-{len(profiles_list)}, default 1]: "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not choice:
+            choice = "1"
+        if not choice.isdigit() or not (1 <= int(choice) <= len(profiles_list)):
+            self.console.print("[red]Invalid choice[/red]")
+            return
+        profile = profiles_list[int(choice) - 1]
+
+        # --- 3) Confirm slow profiles ---
+        if profile in ("comprehensive", "full"):
+            try:
+                ans = input(
+                    f"[yellow]Profile '{profile}' may take "
+                    f"{PROFILES[profile]['estimated']} on Termux.[/yellow]\n"
+                    "Continue? [y/N]: "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if ans not in ("y", "yes"):
+                return
+
+        # --- 4) Run scan ---
+        self.console.print(
+            f"[dim]Running {profile} scan on {target}... (Ctrl+C to abort)[/dim]"
+        )
+        try:
+            result = await scan(target, profile=profile, scope=scope, timeout=1800)
+        except KeyboardInterrupt:
+            self.console.print("[yellow]Scan aborted by user.[/yellow]")
+            return
+        except Exception as e:
+            self.console.print(f"[red]Scan error:[/red] {e}")
+            return
+
+        for w in result.warnings:
+            self.console.print(f"[yellow]! {w}[/yellow]")
+
+        if result.error:
+            self.console.print(f"[red]Scan failed:[/red] {result.error}")
+            return
+
+        # --- 5) Results table ---
+        if not result.ports:
+            self.console.print("[yellow]No open ports found.[/yellow]")
+        else:
+            risk_colors = {
+                "critical": "bold red",
+                "high": "red",
+                "medium": "yellow",
+                "low": "green",
+            }
+            rt = Table(
+                title=f"Open Ports ({len(result.ports)}) — profile: {result.profile}",
+                border_style="cyan",
+                show_header=True,
+            )
+            rt.add_column("Port", style="bold", justify="right")
+            rt.add_column("Proto")
+            rt.add_column("Service", style="cyan")
+            rt.add_column("Product / Version")
+            rt.add_column("Risk")
+            for port in result.ports:
+                rc = risk_colors.get(port.risk, "white")
+                pv = " ".join(filter(None, [port.product, port.version])) or "-"
+                rt.add_row(
+                    str(port.port),
+                    port.protocol,
+                    port.service,
+                    pv,
+                    f"[{rc}]{port.risk}[/{rc}]",
+                )
+            self.console.print(rt)
+
+            # --- 6) Detailed notes for high/critical ---
+            notable = [p for p in result.ports if p.risk in ("critical", "high")]
+            if notable:
+                self.console.print()
+                for port in notable:
+                    self.console.print(
+                        f"[bold red]{port.port}/{port.protocol} "
+                        f"({port.service})[/bold red] — {port.description}"
+                    )
+                    for n in port.notes:
+                        self.console.print(f"  • {n}")
+
+        # --- 7) Risk summary ---
+        rs = result.risk_summary()
+        self.console.print()
+        self.console.print(
+            f"[bold]Risk Summary:[/bold]  "
+            f"Critical: [bold red]{rs['critical']}[/bold red]  |  "
+            f"High: [red]{rs['high']}[/red]  |  "
+            f"Medium: [yellow]{rs['medium']}[/yellow]  |  "
+            f"Low: [green]{rs['low']}[/green]"
+        )
+        self.console.print(f"[dim]Duration: {result.duration_seconds}s[/dim]")
+        if result.os_guess:
+            self.console.print(f"[dim]OS guess: {result.os_guess}[/dim]")
+
+        # --- 8) Save ---
+        if self.session:
+            try:
+                await self.session.set_phase("p4", result.to_dict())
+                await self.session.log_event(
+                    "p4", "info",
+                    f"scan {target} profile={profile} ports={len(result.ports)}",
+                    result.to_dict(),
+                )
+                self.console.print("[dim]تم الحفظ في الجلسة / Saved to session[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+        # --- 9) Suggest next ---
+        if result.ports:
+            self.console.print(
+                "\n[bold cyan]→ Next:[/bold cyan] "
+                "Run Phase 5 (Vulnerability Scan) to check these services "
+                "against known CVEs."
+            )
+
+    async def _phase5(self) -> None:
+        """Vulnerability scan: offline DB + banners + optional nuclei."""
+        from phases.p5_vuln_scan import scan as vuln_scan
+        from core.scope import Scope
+
+        # --- target ---
+        target = self.target
+        if not target and self.session:
+            p3 = await self.session.get_phase_data("p3")
+            if p3:
+                target = p3.get("ip")
+        if not target:
+            self.console.print("[yellow]No target. Run Phase 3 first.[/yellow]")
+            return
+
+        # --- ports from Phase 4 ---
+        p4 = await self.session.get_phase_data("p4") if self.session else None
+        if not p4 or not p4.get("ports"):
+            self.console.print(
+                "[yellow]No port data. Run Phase 4 (Port Scan) first.[/yellow]"
+            )
+            return
+        ports = p4["ports"]
+        self.console.print(
+            f"[bold]Target:[/bold] {target}  "
+            f"({len(ports)} open ports from Phase 4)"
+        )
+
+        # --- nuclei question ---
+        from integrations.nuclei_runner import find_nuclei
+        binary = await find_nuclei()
+        run_nuclei = False
+        if binary and any(p.get("port") in (80, 443, 8080, 8443) for p in ports):
+            try:
+                ans = input("Enable nuclei web scan? [y/N, slow on Termux]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+            run_nuclei = ans in ("y", "yes")
+
+        # --- run ---
+        scope = self.scope or Scope()
+        self.console.print("[dim]Scanning for known CVEs...[/dim]")
+        try:
+            result = await vuln_scan(
+                target, ports, scope=scope,
+                run_nuclei=run_nuclei, timeout=180,
+            )
+        except Exception as e:
+            self.console.print(f"[red]Vuln scan failed:[/red] {e}")
+            return
+
+        for w in result.warnings:
+            self.console.print(f"[yellow]! {w}[/yellow]")
+        if result.error:
+            self.console.print(f"[red]Error:[/red] {result.error}")
+            return
+
+        # --- results table ---
+        if not result.vulns:
+            self.console.print("[green]No known CVEs matched.[/green]")
+        else:
+            sev_colors = {
+                "critical": "bold red", "high": "red",
+                "medium": "yellow", "low": "green", "info": "dim",
+            }
+            vt = Table(
+                title=f"Vulnerabilities ({len(result.vulns)})",
+                border_style="red", show_header=True,
+            )
+            vt.add_column("CVE / ID", style="bold")
+            vt.add_column("Severity")
+            vt.add_column("CVSS", justify="right")
+            vt.add_column("Port")
+            vt.add_column("Product / Version")
+            vt.add_column("Fam", justify="center")
+            for v in result.vulns:
+                sc = sev_colors.get(v.severity, "white")
+                pv = " ".join(filter(None, [v.product, v.version])) or "-"
+                vt.add_row(
+                    v.id,
+                    f"[{sc}]{v.severity.upper()}[/{sc}]",
+                    f"{v.cvss:.1f}" if v.cvss is not None else "-",
+                    str(v.port) if v.port else "-",
+                    pv,
+                    "[bold yellow]★[/bold yellow]" if v.famous else "",
+                )
+            self.console.print(vt)
+
+            # --- details for critical / famous ---
+            notable = [
+                v for v in result.vulns
+                if v.severity == "critical" or v.famous
+            ]
+            if notable:
+                self.console.print()
+                for v in notable:
+                    self.console.print(
+                        f"[bold red]▸ {v.id}[/bold red]  "
+                        f"(CVSS {v.cvss})  {v.description}"
+                    )
+                    self.console.print(f"   Impact: {v.impact}")
+                    self.console.print(f"   Fix:    {v.remediation}")
+
+        # --- summary ---
+        ss = result.severity_summary()
+        self.console.print()
+        self.console.print(
+            f"[bold]Severity Summary:[/bold]  "
+            f"Critical: [bold red]{ss['critical']}[/bold red]  |  "
+            f"High: [red]{ss['high']}[/red]  |  "
+            f"Medium: [yellow]{ss['medium']}[/yellow]  |  "
+            f"Low: [green]{ss['low']}[/green]"
+        )
+        self.console.print(f"[dim]Duration: {result.duration_seconds}s  |  "
+                           f"Sources: {', '.join(result.sources_used) or 'none'}[/dim]")
+
+        # --- save ---
+        if self.session:
+            try:
+                await self.session.set_phase("p5", result.to_dict())
+                await self.session.log_event(
+                    "p5", "info",
+                    f"vulnscan {target}: {len(result.vulns)} vulns",
+                    result.to_dict(),
+                )
+                self.console.print("[dim]تم الحفظ في الجلسة / Saved to session[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+        # --- hint P6 ---
+        exploitable = [
+            v for v in result.vulns
+            if v.severity in ("critical", "high") and v.famous
+        ]
+        if exploitable:
+            ids = ", ".join(v.id for v in exploitable[:3])
+            self.console.print(
+                f"\n[bold yellow]⚠ {len(exploitable)} WELL-KNOWN CVE(s)[/bold yellow]: "
+                f"{ids}\n"
+                "[dim]Phase 6 (Safe Exploitation) will show options — "
+                "requires EXPLOIT confirmation before any action.[/dim]"
+            )
+
+    async def _phase6(self) -> None:
+        """Safe exploitation — dry-run with mandatory EXPLOIT confirmation."""
+        from phases.p6_exploit import prepare, CONFIRMATION_WORD
+        from core.scope import Scope
+
+        target = self.target
+        if not target and self.session:
+            p3 = await self.session.get_phase_data("p3")
+            if p3:
+                target = p3.get("ip")
+        if not target:
+            self.console.print("[yellow]No target. Run Phase 3 first.[/yellow]")
+            return
+
+        p5 = await self.session.get_phase_data("p5") if self.session else None
+        if not p5 or not p5.get("vulns"):
+            self.console.print(
+                "[yellow]No vulnerability data. Run Phase 5 first.[/yellow]"
+            )
+            return
+        vulns = p5["vulns"]
+
+        # --- mandatory ethical gate ---
+        self.console.print(
+            Panel(
+                "[bold red]⚠  EXPLOITATION PLANNING[/bold red]\n\n"
+                "This phase displays exploitation plans.\n"
+                "It does [bold]NOT[/bold] execute anything automatically.\n"
+                "Even with confirmation, only metadata is shown.\n\n"
+                "[yellow]By proceeding, you confirm this is YOUR network,\n"
+                "or you have explicit written permission to test.[/yellow]",
+                title="Safety Gate",
+                border_style="red",
+            )
+        )
+
+        scope = self.scope or Scope()
+        try:
+            result = await prepare(target, vulns, scope=scope)
+        except Exception as e:
+            self.console.print(f"[red]Preparation failed:[/red] {e}")
+            return
+
+        if result.error:
+            self.console.print(f"[red]Error:[/red] {result.error}")
+            return
+
+        if not result.plans:
+            self.console.print(
+                "[green]No exploit modules available for these CVEs.[/green]\n"
+                "[dim](Vuln DB has metadata, but no exploitation module registered.)[/dim]"
+            )
+            return
+
+        # --- plans table ---
+        pt = Table(
+            title=f"Exploitation Plans ({len(result.plans)})",
+            border_style="red",
+        )
+        pt.add_column("#", style="bold cyan", width=3)
+        pt.add_column("CVE")
+        pt.add_column("CVSS", justify="right")
+        pt.add_column("Port")
+        pt.add_column("Module")
+        pt.add_column("Tool")
+        for i, plan in enumerate(result.plans, start=1):
+            pt.add_row(
+                str(i),
+                plan.cve,
+                f"{plan.cvss:.1f}",
+                str(plan.port) if plan.port else "-",
+                plan.module,
+                plan.tool,
+            )
+        self.console.print(pt)
+
+        # --- choose plan ---
+        try:
+            choice = input(
+                f"Choose plan [1-{len(result.plans)}, Enter to cancel]: "
+            ).strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not choice:
+            return
+        if not choice.isdigit() or not (1 <= int(choice) <= len(result.plans)):
+            self.console.print("[red]Invalid choice[/red]")
+            return
+        plan = result.plans[int(choice) - 1]
+
+        # --- full detail card ---
+        req = "\n".join(f"  • {r}" for r in plan.requirements)
+        roll = "\n".join(f"  • {r}" for r in plan.rollback)
+        self.console.print(
+            Panel(
+                f"[bold]{plan.cve}[/bold]  (CVSS {plan.cvss:.1f}, {plan.severity})\n"
+                f"Target:     {target}:{plan.port} "
+                f"({plan.target_product or '?'} {plan.target_version or ''})\n"
+                f"Module:     [cyan]{plan.module}[/cyan]\n"
+                f"Tool:       {plan.tool}\n\n"
+                f"[bold]Impact:[/bold]\n  {plan.impact}\n\n"
+                f"[bold]Requirements:[/bold]\n{req}\n\n"
+                f"[bold]Rollback plan:[/bold]\n{roll}\n\n"
+                f"[yellow]{plan.risk_note}[/yellow]\n"
+                f"[dim]{plan.ethical}[/dim]",
+                title="Exploitation Card",
+                border_style="red",
+            )
+        )
+
+        # --- confirmation ---
+        self.console.print(
+            f"\n[bold yellow]Type [red]{CONFIRMATION_WORD}[/red] "
+            f"(all caps, exact) to acknowledge, or anything else to abort:[/bold yellow]"
+        )
+        try:
+            answer = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+
+        from phases.p6_exploit import confirm_and_mark
+        matched = confirm_and_mark(plan, answer)
+
+        if not matched:
+            self.console.print(
+                "[yellow]Aborted — confirmation word did not match.[/yellow]"
+            )
+            return
+
+        self.console.print(
+            Panel(
+                "[bold green]✓ Plan acknowledged.[/bold green]\n\n"
+                "[yellow]DRY-RUN MODE[/yellow] — no packets were sent, "
+                "no exploit was fired.\n"
+                "The steps above are what a real run would do.\n\n"
+                "[dim]To actually run it you must:\n"
+                "  1. Install msfconsole (not available by default on Termux)\n"
+                "  2. Manually verify scope, backups, and legal coverage\n"
+                "  3. Re-run the tool with an explicit --execute flag (future version)[/dim]",
+                title="Confirmed (Dry-Run)",
+                border_style="green",
+            )
+        )
+
+        # --- save ---
+        if self.session:
+            try:
+                await self.session.set_phase("p6", result.to_dict())
+                await self.session.log_event(
+                    "p6", "warn",
+                    f"exploit plan acknowledged for {plan.cve} (dry-run)",
+                    {"plan": plan.to_dict(), "confirmed": True, "executed": False},
+                )
+                self.console.print("[dim]تم الحفظ في الجلسة / Saved to session[/dim]")
+            except Exception as e:
+                self.console.print(f"[yellow]Save failed: {e}[/yellow]")
+
+    async def _phase7(self) -> None:
+        """Generate HTML report with user-chosen filename + Downloads copy."""
+        import shutil
+        from pathlib import Path as _P
+        from phases.p7_report import generate as generate_p7
+
+        if not self.session:
+            self.console.print("[red]No active session.[/red]")
+            return
+
+        p5 = await self.session.get_phase_data("p5")
+        if not p5:
+            self.console.print(
+                "[yellow]No scan data. Run phases 2-5 at least once.[/yellow]"
+            )
+            try:
+                cont = input("Generate report anyway? [y/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                return
+            if cont != "y":
+                return
+
+        # 1) اسم التقرير
+        default_name = f"recon-{self.session.id}.html"
+        self.console.print(
+            "\n[bold]اختر اسم ملف التقرير[/bold] "
+            "[dim](مثال: my-router-scan.html)[/dim]"
+        )
+        self.console.print(f"[dim]Enter فقط = {default_name}[/dim]")
+        try:
+            raw = input("File name: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return
+        filename = raw or default_name
+        # sanitize: اجعلها .html فقط + أحرف آمنة
+        base = filename[:-5] if filename.lower().endswith(".html") else filename
+        base = "".join(c for c in base if c.isalnum() or c in " ._-()").strip()
+        if not base:
+            base = default_name[:-5]
+        filename = base + ".html"
+
+        # 2) توليد في reports/output/
+        self.console.print(f"[dim]Generating: {filename}...[/dim]")
+        try:
+            result = await generate_p7(self.session, filename=filename)
+        except Exception as e:
+            self.console.print(f"[red]Report generation failed:[/red] {e}")
+            return
+
+        if not result.get("ok"):
+            self.console.print(f"[red]Error:[/red] {result.get('error')}")
+            return
+
+        report_path = result["path"]
+        size_kb = result["size_bytes"] / 1024
+
+        # 3) نسخ إلى Downloads (للوصول من متصفح الجوال)
+        downloads_dst = None
+        downloads_dir = _P("/storage/emulated/0/Download")
+        if downloads_dir.is_dir():
+            try:
+                dst = downloads_dir / filename
+                shutil.copy(report_path, dst)
+                downloads_dst = str(dst)
+            except Exception as e:
+                self.console.print(f"[yellow]نسخ إلى Downloads فشل: {e}[/yellow]")
+        else:
+            self.console.print(
+                "[yellow]Downloads غير متاح.[/yellow] نفّذ أولًا: "
+                "[bold]termux-setup-storage[/bold] (اسمح بالوصول)"
+            )
+
+        # 4) عرض النتيجة
+        body = (
+            f"[bold green]\u2713 تم توليد التقرير[/bold green]\n\n"
+            f"الاسم:    [cyan]{filename}[/cyan]\n"
+            f"الحجم:    {size_kb:.1f} KB\n"
+            f"الصيغة:   HTML (مستقل، ثيم داكن)\n\n"
+            f"[bold]النسخة الداخلية:[/bold]\n"
+            f"  {report_path}\n"
+        )
+        if downloads_dst:
+            body += (
+                f"\n[bold]نسخة في التنزيلات (لفتحها من المتصفح):[/bold]\n"
+                f"  [yellow]{downloads_dst}[/yellow]\n"
+                f"\n[dim]افتح تطبيق Files \u2192 Downloads \u2192 {filename}[/dim]\n"
+                f"[dim]أو: termux-open --content-type text/html '{downloads_dst}'[/dim]"
+            )
+        else:
+            body += (
+                f"\n[bold]فتح التقرير:[/bold]\n"
+                f"  termux-open --content-type text/html '{report_path}'\n"
+                f"[dim]أو انسخه يدويًا إلى /storage/emulated/0/Download/[/dim]"
+            )
+
+        self.console.print(
+            Panel(body, title="Report Ready", border_style="green")
+        )
+
+        # 5) حفظ في الجلسة
+        try:
+            await self.session.set_phase("p7", {
+                **result,
+                "downloads_path": downloads_dst,
+            })
+            await self.session.log_event(
+                "p7", "info",
+                f"report: {filename} ({size_kb:.1f} KB)",
+                {"path": report_path, "downloads": downloads_dst},
+            )
+        except Exception:
+            pass
+
+    async def _close(self) -> None:
+        if self.session:
+            try:
+                await self.session.close()
+            except Exception:
+                pass
+        self.console.print("[dim]Session closed. Goodbye.[/dim]")
+
+
+def main(demo: bool = False, resume: str | None = None) -> None:
+    import asyncio
+    try:
+        asyncio.run(CLI(demo=demo, session_id=resume).start())
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--demo", action="store_true")
+    p.add_argument("--resume", metavar="SESSION_ID", default=None,
+                   help="Resume an existing session")
+    a = p.parse_args()
+    main(demo=a.demo, resume=a.resume)

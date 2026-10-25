@@ -1,0 +1,100 @@
+app:
+  title: منصة الفحص الأمني
+  subtitle: Recon Orchestrator
+  version: الإصدار
+menu:
+  phases_title: المراحل السبع
+  commands_hint: 'الأوامر: 1-7 مرحلة • t هدف • s نطاق • r حالة • l جلسات • p منصة • h مساعدة • q خروج'
+phase:
+  p1: كشف نوع الشبكة
+  p2: اكتشاف الأجهزة على الشبكة
+  p3: اختيار الهدف
+  p4: فحص المنافذ
+  p5: فحص الثغرات
+  p6: الاستغلال الآمن
+  p7: توليد التقرير
+  p1_running: جارٍ فحص نوع الشبكة (حد أقصى 5 ثوانٍ)
+  p2_running: جارٍ اكتشاف الأجهزة على الشبكة
+  p3_running: جارٍ عرض الأجهزة للاختيار
+  p4_running: جارٍ فحص المنافذ
+  p5_running: جارٍ فحص الثغرات
+  p6_running: جارٍ عرض خطط الاستغلال
+  p7_running: جارٍ توليد التقرير
+phase_desc:
+  p1: كشف captive portal و MITM وتصنيف الشبكة
+  p2: ARP/NDP scan + بصمة نظام + نوع الجهاز
+  p3: اختر هدفًا، تحقق من scope.txt
+  p4: 'بروفايلات: سريع، شامل، خفي، UDP، NSE'
+  p5: Nuclei/Nikto/Searchsploit/OpenVAS
+  p6: عرض خطط + تأكيد EXPLOIT + dry-run
+  p7: تقرير HTML + خط زمني + خطة معالجة
+messages:
+  running: جارٍ التشغيل...
+  done: تم
+  saved: تم الحفظ في الجلسة
+  cancelled: تم الإلغاء
+  error: خطأ
+  warning: تحذير
+  no_data: لا توجد بيانات — شغّل المراحل السابقة أولًا
+  scanning: جارٍ الفحص...
+  generating: جارٍ التوليد...
+platform:
+  title: المنصة المكتشفة
+  system: النظام
+  privilege: الصلاحيات
+  capabilities: القدرات المتاحة
+  available: متاح
+  missing: غير متاح
+  hint_root: 'لفتح كل القدرات (SYN, UDP, OS): استخدم Kali Linux'
+  standard_user: مستخدم عادي
+  root_available: root متاح
+status:
+  target: الهدف
+  session: الجلسة
+  platform: المنصة
+  root: root
+  demo: وضع العرض
+  unset: (غير محدد)
+  none: لا يوجد
+common:
+  true: نعم
+  false: لا
+  ok: حسنًا
+  cancel: إلغاء
+  save: حفظ
+  exit: خروج
+  back: رجوع
+  continue: متابعة
+ui:
+  banner_subtitle: منصة العمليات الأمنية
+  menu_header: المراحل السبع
+  status_title: الحالة
+  target_unset: (غير محدد)
+  commands_help: 'الأوامر المتاحة:'
+  input_prompt: اختر
+  phase_prefix: المرحلة
+  scan_profiles: بروفايلات الفحص
+  choose_profile: اختر البروفايل
+  open_ports: المنافذ المفتوحة
+  vulnerabilities: الثغرات المكتشفة
+  risk_summary: ملخص الخطورة
+  target_selected: الهدف المختار
+  exploit_plans: خطط الاستغلال
+  safety_gate: بوابة الأمان
+  confirm_exploit: اكتب EXPLOIT للتأكيد
+  report_ready: التقرير جاهز
+  filename_prompt: اسم ملف التقرير
+  next_step: الخطوة التالية
+  results: النتائج
+  duration: المدة
+  saved: تم الحفظ في الجلسة
+  no_data: لا توجد بيانات
+  running_probes: جارٍ التشغيل
+  type: النوع
+  confidence: الثقة
+  gateway: البوابة
+  iface: الواجهة
+  local_ip: عنوان IP
+  safe_to_scan: آمن للفحص
+  yes_word: نعم
+  no_word: لا

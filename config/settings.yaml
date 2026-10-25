@@ -1,0 +1,33 @@
+# ============================================================
+# recon-orchestrator — settings
+# Edit safely — every option has a sane default.
+# ============================================================
+
+language:
+  # auto: detect from LANG env; fallback if not Arabic
+  # ar: Arabic only
+  # en: English only
+  # bilingual: Arabic primary + English secondary (recommended)
+  mode: auto
+  fallback: bilingual
+
+display:
+  color: true
+  emoji: true
+  compact: false
+
+scans:
+  default_profile: quick
+  parallel_probes: true
+  max_workers: 10
+  max_duration_seconds: 1800
+
+reports:
+  # auto = /storage/emulated/0/Download/ on Termux, ~/recon-reports on Kali
+  default_dir: auto
+  include_reference_catalog: true
+  embed_css: true
+
+safety:
+  require_exploit_confirmation: true
+  confirm_word: "EXPLOIT"

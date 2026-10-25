@@ -1,0 +1,18 @@
+nmap:
+  binary: nmap
+  requires_root_for_syn: true
+  fallback_connect_scan: "-sT"
+  profiles:
+    quick:         "-T4 -F"
+    comprehensive: "-T4 -p- -A"
+    stealth:       "-T2 -sS -Pn"
+    udp:           "-sU --top-ports 50"
+    nse:           "--script vuln"
+nuclei:
+  binary: nuclei
+  rate_limit: 150
+  severity_default: "critical,high"
+searchsploit:
+  binary: searchsploit
+msfconsole:
+  binary: msfconsole

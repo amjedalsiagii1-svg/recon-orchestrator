@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recon Report — {{ target }}</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;margin:0 auto;padding:14px;background:#0d1117;color:#c9d1d9;line-height:1.6;max-width:1100px}
+h1{color:#58a6ff;margin:0 0 8px 0;font-size:1.5em}
+h2{color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:6px;margin-top:0;font-size:1.15em}
+h3{color:#79c0ff;font-size:1em;margin:14px 0 6px}
+h4{color:#8b949e;font-size:0.92em;margin:10px 0 4px}
+code,pre,kbd,samp{background:#0d1117;padding:2px 6px;border-radius:3px;font-size:0.88em;direction:ltr !important;unicode-bidi:isolate;display:inline-block;text-align:left}
+code:lang(ar){}  /* no-op */
+.cmd,.cmd-block{background:#000;color:#7ee787;padding:8px 10px;border-radius:4px;font-size:0.82em;margin:6px 0;display:block;direction:ltr !important;unicode-bidi:isolate;white-space:pre-wrap;word-break:break-all;text-align:left;border:1px solid #21262d}
+ul,ol{padding-right:20px;margin:6px 0}
+section{margin-bottom:18px;background:#161b22;padding:14px;border-radius:8px;border:1px solid #30363d}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.badge{display:inline-block;padding:6px 12px;border-radius:6px;font-weight:600;font-size:0.88em}
+.badge.critical{background:#f85149;color:#fff}
+.badge.high{background:#d29922;color:#000}
+.badge.medium{background:#e3b341;color:#000}
+.badge.low{background:#3fb950;color:#000}
+.badge.info{background:#6e7681;color:#fff}
+.alert{background:rgba(248,81,73,0.12);border-right:4px solid #f85149;padding:10px;border-radius:4px;margin:10px 0;color:#f85149;font-weight:600}
+.alert.high-alert{border-color:#d29922;color:#d29922;background:rgba(210,153,34,0.12)}
+.ok-msg{color:#3fb950;padding:10px;font-weight:600}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:0.85em;direction:ltr}
+th,td{padding:7px;text-align:left;border-bottom:1px solid #30363d}
+th{background:#0d1117;font-weight:600;color:#8b949e;font-size:0.78em;text-transform:uppercase}
+tr:last-child td{border-bottom:none}
+tr:hover{background:rgba(88,166,255,0.04)}
+.sev{display:inline-block;padding:2px 9px;border-radius:4px;font-size:0.74em;font-weight:700}
+.sev-critical{background:#f85149;color:#fff}
+.sev-high{background:#d29922;color:#000}
+.sev-medium{background:#e3b341;color:#000}
+.sev-low{background:#3fb950;color:#000}
+.sev-info{background:#6e7681;color:#fff}
+.access{display:inline-block;padding:3px 10px;border-radius:4px;font-weight:700;font-size:0.8em}
+.access-root,.access-system{background:#f85149;color:#fff}
+.access-admin,.access-admin_panel{background:#d29922;color:#000}
+.access-user,.access-www-data{background:#3fb950;color:#000}
+.access-info{background:#58a6ff;color:#fff}
+.access-none{background:#6e7681;color:#fff}
+.exploit-card{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:0;margin-bottom:10px}
+.exploit-card summary{padding:10px;cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:0.92em}
+.exploit-card summary::-webkit-details-marker{color:#58a6ff}
+.exploit-card[open] summary{border-bottom:1px solid #30363d}
+.exploit-body{padding:12px 14px}
+.exploit-body h3{color:#79c0ff;margin-top:12px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 16px;font-size:0.88em;margin:6px 0}
+.kv dt{font-weight:600;color:#8b949e}
+.kv dd{margin:0}
+.cap-list li{color:#c9d1d9}
+.limit-list li{color:#f0b400}
+.methods-tbl{font-size:0.78em}
+.famous{color:#f0b400;font-weight:bold}
+.info-card{background:#0d1117;border:1px dashed #30363d;border-radius:6px;padding:10px;margin-bottom:8px;font-size:0.9em;color:#8b949e}
+.timeline{list-style:none;padding:0;margin:0}
+.timeline li{padding:5px 10px 5px 0;border-right:3px solid #58a6ff;margin-bottom:2px;font-size:0.85em}
+.timeline code{font-size:0.78em;color:#8b949e}
+footer{margin-top:20px;padding:14px;color:#8b949e;font-size:0.8em;text-align:center;border-top:1px solid #30363d}
+.warn-box{background:rgba(240,180,0,0.08);border-right:3px solid #f0b400;padding:10px;border-radius:4px;margin:10px 0;font-size:0.88em}
+.probe-info{background:#000;border:1px solid #21262d;border-radius:4px;padding:8px 10px;margin-top:6px;font-size:0.82em;direction:ltr;text-align:left;color:#8b949e}
+.probe-info strong{color:#c9d1d9}
+.probe-info .probe-title{color:#7ee787;font-weight:600;margin-bottom:4px;display:block}
+.probe-info ul{margin:4px 0;padding-left:16px;padding-right:0}
+.probe-info li{margin-bottom:2px;color:#c9d1d9;font-size:0.95em}
+.probe-warn{color:#f0b400;font-weight:600}
+.probe-ok{color:#3fb950}
+.guide-box{background:rgba(88,166,255,0.08);border-right:3px solid #58a6ff;padding:12px;border-radius:6px;margin:10px 0}
+.guide-box p{margin:6px 0;line-height:1.7}
+.how-list{padding-right:22px;margin:8px 0}
+.how-list li{margin-bottom:6px;line-height:1.6;color:#c9d1d9}
+.cmd-list{display:flex;flex-direction:column;gap:8px;margin:8px 0}
+.cmd-item{background:#000;border:1px solid #30363d;border-radius:4px;padding:8px 10px}
+.cmd-item .cmd{color:#7ee787;background:transparent;padding:0;font-size:0.85em;display:block;word-break:break-all}
+.cmd-item .cmd-desc{color:#8b949e;font-size:0.82em;margin-top:4px}
+.cmd-block{display:block;background:#000;color:#7ee787;padding:10px;border-radius:4px;font-size:0.82em;margin:6px 0;white-space:pre-wrap;word-break:break-all;direction:ltr;text-align:left;border:1px solid #21262d}
+.steps-list{display:flex;flex-direction:column;gap:10px;margin:8px 0}
+.step-item{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px}
+.step-header{display:flex;gap:10px;align-items:center;margin-bottom:6px}
+.step-num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#58a6ff;color:#fff;border-radius:50%;font-weight:bold;font-size:0.85em;flex-shrink:0}
+.step-explain{color:#8b949e;font-size:0.84em;margin-top:6px;line-height:1.6}
+@media (max-width:600px){body{padding:8px}section{padding:11px}th,td{padding:5px;font-size:0.78em}h1{font-size:1.3em}}
+</style>
+</head>
+<body>
+
+<header>
+<h1>🔍 Recon Report</h1>
+<p>الهدف: <strong>{{ target }}</strong> &nbsp;·&nbsp; الجلسة: <code>{{ session_id }}</code></p>
+<p style="color:#8b949e;margin:4px 0 0 0;font-size:0.85em">تاريخ التوليد: {{ generated_at }}</p>
+</header>
+
+<section>
+<h2>الملخص التنفيذي</h2>
+<div class="badges">
+<span class="badge critical">{{ severity.critical }} حرجة</span>
+<span class="badge high">{{ severity.high }} عالية</span>
+<span class="badge medium">{{ severity.medium }} متوسطة</span>
+<span class="badge low">{{ severity.low }} منخفضة</span>
+<span class="badge info">{{ severity.info }} معلوماتية</span>
+</div>
+{% if severity.critical > 0 %}
+<div class="alert">⚠ {{ severity.critical }} ثغرة حرجة تتطلب إجراءً فوريًا</div>
+{% elif severity.high > 0 %}
+<div class="alert high-alert">⚠ {{ severity.high }} ثغرة عالية الخطورة</div>
+{% elif vulns|length == 0 %}
+<div class="ok-msg">✓ لم يتم اكتشاف أي ثغرة</div>
+{% endif %}
+</section>
+
+{% if exploit_vulns_count > 0 %}
+<section>
+<h2>إمكانية الاستغلال</h2>
+<dl class="kv">
+<dt>ثغرات قابلة للاستغلال</dt><dd><strong>{{ exploit_vulns_count }}</strong> من أصل {{ vulns|length }}</dd>
+<dt>أعلى صلاحية يمكن الحصول عليها</dt><dd><span class="access access-{{ max_access }}">{{ max_access|upper }}</span></dd>
+<dt>طرق الاستغلال المتاحة</dt><dd><strong>{{ total_methods }}</strong> طريقة مختلفة</dd>
+<dt>إجراءات بعد الاستغلال</dt><dd><strong>{{ total_post }}</strong> إجراء ممكن (سرقة WiFi، backdoor، pivot…)</dd>
+</dl>
+<div class="warn-box">
+⚠ <strong>تحذير</strong>: هذا التقرير معلوماتي. لا ينفذ أي استغلال تلقائيًا. أي تنفيذ يتطلب تأكيدًا صريحًا + بيئة معزولة + تغطية قانونية.
+</div>
+</section>
+{% endif %}
+
+{% if network_profile %}
+<section>
+<h2>🌐 ملف الشبكة — التصنيف الكامل</h2>
+<dl class="kv">
+<dt>النوع</dt><dd><strong>{{ network_profile.type_ar }}</strong></dd>
+<dt>الثقة</dt><dd>{{ (network_profile.confidence * 100)|int }}%</dd>
+<dt>الواجهة</dt><dd><code>{{ network_profile.iface or '—' }}</code></dd>
+<dt>البوابة</dt><dd><code>{{ network_profile.gateway or '—' }}</code>{% if network_profile.gateway_vendor %} ({{ network_profile.gateway_vendor }}){% endif %}</dd>
+<dt>الشبكة</dt><dd><code>{{ network_profile.subnet or '—' }}</code></dd>
+<dt>عنوان IP</dt><dd><code>{{ network_profile.local_ips|join(', ') or '—' }}</code></dd>
+<dt>DNS</dt><dd>{% if network_profile.dns_servers %}{% for d in network_profile.dns_servers %}<code>{{ d }}</code> {% endfor %}{% else %}—{% endif %}</dd>
+<dt>آمن للفحص؟</dt><dd>{% if network_profile.is_safe_to_scan %}<span style="color:#3fb950;font-weight:bold">✓ نعم</span>{% else %}<span style="color:#f85149;font-weight:bold">⚠ لا — راجع التحذيرات</span>{% endif %}</dd>
+</dl>
+{% if network_profile.reasons %}
+<p style="margin:8px 0;font-size:0.9em;color:#8b949e"><strong>الأسباب:</strong></p>
+<ul style="padding-right:20px;margin:6px 0;font-size:0.9em">
+{% for r in network_profile.reasons %}<li>{{ r }}</li>{% endfor %}
+</ul>
+{% endif %}
+{% if network_profile.warnings %}
+<div class="warn-box" style="background:rgba(248,81,73,0.1);border-right:4px solid #f85149;padding:10px;margin:10px 0;border-radius:4px">
+<strong>⚠ تحذيرات:</strong>
+<ul style="padding-right:20px;margin:6px 0">
+{% for w in network_profile.warnings %}<li>{{ w }}</li>{% endfor %}
+</ul>
+</div>
+{% endif %}
+</section>
+{% endif %}
+
+{% if network %}
+<section>
+<h2>معلومات الشبكة</h2>
+<dl class="kv">
+<dt>عنوان IP المحلي</dt><dd>{{ network.local_ips|join(', ') if network.local_ips else '—' }}</dd>
+<dt>البوابة</dt><dd>{{ network.default_gateway or '—' }}</dd>
+<dt>الواجهة</dt><dd>{{ network.default_iface or '—' }}</dd>
+<dt>التصنيف</dt><dd>{{ classification.type or '—' }}{% if classification.confidence %} (ثقة {{ classification.confidence }}){% endif %}</dd>
+</dl>
+</section>
+{% endif %}
+
+{% if devices %}
+<section>
+<h2>الأجهزة المكتشفة ({{ devices|length }})</h2>
+<table>
+<thead><tr><th>IP</th><th>النوع</th><th>Hostname</th><th>المصنّع</th><th>MAC</th></tr></thead>
+<tbody>
+{% for d in devices %}
+<tr>
+<td>{{ d.ip }}{% if d.is_gateway %} <span class="famous">[GW]</span>{% endif %}</td>
+<td>{{ d.device_type }}</td>
+<td>{{ d.hostname or '—' }}</td>
+<td>{{ d.vendor or '—' }}</td>
+<td><code>{{ d.mac or '—' }}</code></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</section>
+{% endif %}
+
+{% if ports %}
+<section>
+<h2>المنافذ المفتوحة ({{ ports|length }})</h2>
+<table>
+<thead><tr><th>المنفذ</th><th>البروتوكول</th><th>الخدمة</th><th>المنتج/الإصدار</th><th>الخطورة</th></tr></thead>
+<tbody>
+{% for p in ports %}
+<tr>
+<td>{{ p.port }}</td>
+<td>{{ p.protocol }}</td>
+<td>{{ p.service }}</td>
+<td>{{ p.product or '—' }}{% if p.version %} {{ p.version }}{% endif %}</td>
+<td><span class="sev sev-{{ p.risk }}">{{ p.risk|upper }}</span></td>
+</tr>
+{% if p.probe and not p.probe.error and (p.probe.http_title or p.probe.http_server or p.probe.tls_version or p.probe.ssh_version or p.probe.ftp_welcome or p.probe.smtp_banner or p.probe.http_cookies or p.probe.http_missing_headers) %}
+<tr>
+<td colspan="5" style="padding:0 0 6px 0">
+<div class="probe-info">
+{% if p.probe.http_title %}<span class="probe-title">📄 {{ p.probe.http_title }}</span>{% endif %}
+<ul>
+{% if p.probe.http_status %}<li><strong>HTTP Status:</strong> {{ p.probe.http_status }}</li>{% endif %}
+{% if p.probe.http_server %}<li><strong>Server:</strong> {{ p.probe.http_server }}</li>{% endif %}
+{% if p.probe.http_powered_by %}<li><strong>Powered-By:</strong> {{ p.probe.http_powered_by }}</li>{% endif %}
+{% if p.probe.http_redirect %}<li><strong>Redirect →</strong> <code>{{ p.probe.http_redirect }}</code></li>{% endif %}
+{% if p.probe.http_auth_realm %}<li><strong>Auth Realm:</strong> {{ p.probe.http_auth_realm }}</li>{% endif %}
+{% if p.probe.tls_version %}<li><strong>TLS:</strong> {{ p.probe.tls_version }}</li>{% endif %}
+{% if p.probe.tls_subject %}<li><strong>Cert Subject:</strong> {{ p.probe.tls_subject }}</li>{% endif %}
+{% if p.probe.tls_issuer %}<li><strong>Cert Issuer:</strong> {{ p.probe.tls_issuer }}{% if p.probe.tls_self_signed %} <span class="probe-warn">⚠ Self-signed</span>{% endif %}</li>{% endif %}
+{% if p.probe.tls_sans %}<li><strong>SANs:</strong> {{ p.probe.tls_sans|join(', ') }}</li>{% endif %}
+{% if p.probe.ssh_version %}<li><strong>SSH:</strong> <code>{{ p.probe.ssh_version }}</code></li>{% endif %}
+{% if p.probe.ftp_welcome %}<li><strong>FTP:</strong> {{ p.probe.ftp_welcome }}</li>{% endif %}
+{% if p.probe.smtp_banner %}<li><strong>SMTP:</strong> {{ p.probe.smtp_banner }}</li>{% endif %}
+{% if p.probe.http_cookies %}<li><strong>Cookies:</strong>{% for c in p.probe.http_cookies %} <code>{{ c.name }}</code>{% if not c.httponly %} <span class="probe-warn">(⚠ no HttpOnly)</span>{% endif %}{% if not c.secure %} <span class="probe-warn">(⚠ no Secure)</span>{% endif %}{% endfor %}</li>{% endif %}
+{% if p.probe.http_missing_headers %}<li><strong>Missing Security Headers:</strong> <span class="probe-warn">{{ p.probe.http_missing_headers|join(', ') }}</span></li>{% endif %}
+</ul>
+</div>
+</td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</section>
+{% endif %}
+
+{% if vulns %}
+<section>
+<h2>الثغرات المكتشفة ({{ vulns|length }})</h2>
+<table>
+<thead><tr><th>CVE</th><th>الخطورة</th><th>CVSS</th><th>المنفذ</th><th>المنتج</th><th>الصلاحية عند الاستغلال</th></tr></thead>
+<tbody>
+{% for v in vulns %}
+<tr>
+<td><strong>{{ v.id }}</strong>{% if v.famous %} <span class="famous">★</span>{% endif %}</td>
+<td><span class="sev sev-{{ v.severity }}">{{ v.severity|upper }}</span></td>
+<td>{{ v.cvss if v.cvss is not none else '—' }}</td>
+<td>{{ v.port or '—' }}</td>
+<td>{{ v.product or '—' }}{% if v.version %} {{ v.version }}{% endif %}</td>
+<td>
+{% if v.exploit %}
+<span class="access access-{{ v.exploit.access_level }}">{{ v.exploit.access_level|upper }}</span>
+{% else %}
+<span class="access access-none">—</span>
+{% endif %}
+</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</section>
+
+<section>
+<h2>تفاصيل الاستغلال</h2>
+{% for v in vulns %}
+  {% if v.exploit %}
+  <details class="exploit-card" {% if v.severity in ("critical","high") %}open{% endif %}>
+    <summary>
+      <span class="sev sev-{{ v.severity }}">{{ v.severity|upper }}</span>
+      <strong>{{ v.id }}</strong>
+      <span class="access access-{{ v.exploit.access_level }}">{{ v.exploit.access_level|upper }}</span>
+      <span style="color:#8b949e;font-size:0.85em">{{ v.exploit.methods|length }} طريقة · {{ v.exploit.post_exploit|length }} إجراء بعد الاستغلال</span>
+    </summary>
+    <div class="exploit-body">
+
+      {% if v.exploit.simple_explanation %}
+      <div class="guide-box">
+        <h3 style="margin-top:0">📖 الشرح المبسط</h3>
+        <p>{{ v.exploit.simple_explanation }}</p>
+      </div>
+      {% endif %}
+
+      {% if v.exploit.how_it_works %}
+      <h3>🔬 كيف تعمل الثغرة تقنيًا</h3>
+      <ol class="how-list">
+        {% for h in v.exploit.how_it_works %}<li>{{ h }}</li>{% endfor %}
+      </ol>
+      {% endif %}
+
+      {% if v.exploit.attack_vector %}
+      <p style="font-size:0.88em;color:#8b949e">
+        <strong>ناقل الهجوم:</strong> {{ v.exploit.attack_vector }}
+      </p>
+      {% endif %}
+
+      <h3>🔓 الصلاحيات التي تُكتسب</h3>
+      <dl class="kv">
+        <dt>المستوى</dt><dd><span class="access access-{{ v.exploit.access_level }}">{{ v.exploit.access_level }}</span></dd>
+        <dt>المستخدم</dt><dd>{{ v.exploit.access_user or '—' }}</dd>
+        <dt>العملية</dt><dd>{{ v.exploit.access_process or '—' }}</dd>
+        <dt>الاستمرارية</dt><dd>{{ v.exploit.persistence or '—' }}</dd>
+        <dt>الأثر العام</dt><dd>{{ v.exploit.impact }}</dd>
+      </dl>
+
+      {% if v.exploit.capabilities %}
+      <h4>✅ ما يمكنك فعله بعد الاستغلال</h4>
+      <ul class="cap-list">
+        {% for c in v.exploit.capabilities %}<li>{{ c }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.limitations %}
+      <h4>⚠️ حدود الاستغلال</h4>
+      <ul class="limit-list">
+        {% for c in v.exploit.limitations %}<li>{{ c }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.methods %}
+      <h3>🧪 طرق الاستغلال المتاحة</h3>
+      <table class="methods-tbl">
+        <thead><tr><th>الطريقة</th><th>المهارة</th><th>الأدوات</th><th>الموثوقية</th><th>التسلل</th></tr></thead>
+        <tbody>
+        {% for m in v.exploit.methods %}
+        <tr>
+          <td>{{ m.name }}</td>
+          <td>{{ m.skill }}</td>
+          <td>{{ m.tools|join(', ') }}</td>
+          <td>{{ m.reliability }}</td>
+          <td>{{ m.stealth }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      {% if v.exploit.post_exploit %}
+      <h3>🎯 ماذا بعد الاستغلال</h3>
+      <ul>
+        {% for p in v.exploit.post_exploit %}<li>{{ p }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.requirements %}
+      <h3>📋 المتطلبات</h3>
+      <ul>
+        {% for r in v.exploit.requirements %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.rollback %}
+      <h3>↩️ خطة التراجع</h3>
+      <ul>
+        {% for r in v.exploit.rollback %}<li>{{ r }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.steps %}
+      <h3>📋 خطوات التنفيذ (نسخ-لصق)</h3>
+      <div class="warning-box" style="background:rgba(248,81,73,0.1);border-right:4px solid #f85149;padding:10px;margin:10px 0;border-radius:4px">
+        ⚠ <strong>تنبيه</strong>: هذه الأوامر تعليمية. لا تنفّذها إلا على شبكتك المصرّح بها. استبدل <code>&lt;target&gt;</code> بعنوان IP الفعلي. البوابة لا تنفّذ هذه الأوامر — أنت المسؤول.
+      </div>
+
+      {% if v.exploit.prerequisites %}
+      <h4>🔧 المتطلبات (ثبّت الأدوات أولًا)</h4>
+      <div class="cmd-list">
+        {% for pr in v.exploit.prerequisites %}
+        <div class="cmd-item">
+          <code class="cmd">{{ pr.cmd }}</code>
+          <div class="cmd-desc">{{ pr.desc }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <h4>▶️ الخطوات بالترتيب</h4>
+      <div class="steps-list">
+        {% for st in v.exploit.steps %}
+        <div class="step-item">
+          <div class="step-header">
+            <span class="step-num">{{ st.n }}</span>
+            <strong>{{ st.title }}</strong>
+          </div>
+          <code class="cmd cmd-block">{{ st.cmd }}</code>
+          <div class="step-explain">💡 {{ st.explain }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if v.exploit.verification %}
+      <h4>✅ كيف تتحقق من نجاح الاستغلال</h4>
+      <div class="cmd-list">
+        {% for ver in v.exploit.verification %}
+        <div class="cmd-item">
+          <code class="cmd">{{ ver.cmd }}</code>
+          <div class="cmd-desc">✔ المتوقع: {{ ver.expected }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if v.exploit.cleanup %}
+      <h4>🧹 تنظيف الأثر بعد الاختبار</h4>
+      <ul>
+        {% for cl in v.exploit.cleanup %}<li><code>{{ cl.cmd }}</code> — {{ cl.desc }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      {% if v.exploit.warnings %}
+      <h4>⚠️ تحذيرات مهمة</h4>
+      <ul class="limit-list">
+        {% for w in v.exploit.warnings %}<li>{{ w }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+
+      <h3>🛠️ الوحدة والأداة</h3>
+      <dl class="kv">
+        <dt>Module</dt><dd><code>{{ v.exploit.module }}</code></dd>
+        <dt>Tool</dt><dd><code>{{ v.exploit.tool }}</code></dd>
+        <dt>المهارة المطلوبة</dt><dd>{{ v.exploit.skill }}</dd>
+      </dl>
+
+      {% if v.exploit.risk_note %}
+      <div class="warn-box">⚠ {{ v.exploit.risk_note }}</div>
+      {% endif %}
+      {% if v.exploit.ethical %}
+      <div style="font-size:0.82em;color:#8b949e;margin-top:8px">{{ v.exploit.ethical }}</div>
+      {% endif %}
+
+    </div>
+  </details>
+  {% else %}
+  <div class="info-card">
+    <strong>{{ v.id }}</strong> — لا توجد وحدة استغلال في قاعدة البيانات المحلية.
+    استخدم <code>searchsploit {{ v.id }}</code> لمعرفة المزيد.
+  </div>
+  {% endif %}
+{% endfor %}
+</section>
+{% endif %}
+
+{% if remediation %}
+<section>
+<h2>خطة المعالجة</h2>
+<ol>
+{% for r in remediation %}
+<li style="margin-bottom:8px">
+<span class="sev sev-{{ r.severity }}">{{ r.severity|upper }}</span>
+<strong>{{ r.cve }}</strong> — {{ r.remediation }}
+</li>
+{% endfor %}
+</ol>
+</section>
+{% endif %}
+
+{% if events %}
+<section>
+<h2>الخط الزمني</h2>
+<ol class="timeline">
+{% for e in events[:80] %}
+<li><code>{{ e.ts }}</code> <strong>[{{ e.phase or '—' }}]</strong> {{ e.message }}</li>
+{% endfor %}
+</ol>
+</section>
+{% endif %}
+
+<footer>
+Recon Orchestrator v0.6.0 &nbsp;·&nbsp; للاستخدام المُصرّح به فقط &nbsp;·&nbsp; الجلسة <code>{{ session_id }}</code>
+</footer>
+
+<details style="margin-top:24px;background:#161b22;border:1px dashed #30363d;border-radius:8px;padding:12px">
+<summary style="cursor:pointer;color:#8b949e;font-size:0.88em;font-weight:600">
+📚 مرجع اختياري — كل CVEs المعروفة في النظام ({{ all_cves|length }} ثغرة) — اضغط للعرض
+</summary>
+<p style="color:#8b949e;font-size:0.85em;margin:10px 0">
+هذه قائمة <strong>مرجعية فقط</strong> لكل الثغرات التي يعرفها النظام — <strong>حتى لو لم تُكتشف في هذه الجلسة</strong>.
+استخدمها عند فحص جهاز/شبكة أخرى لاحقًا. الثغرات المكتشفة فعليًا في جلستك موجودة في الأقسام أعلاه.
+</p>
+<table>
+<thead><tr>
+<th>CVE</th><th>الصلاحية</th><th>الأداة</th><th>المهارة</th><th>الأثر</th><th>طرق</th>
+</tr></thead>
+<tbody>
+{% for c in all_cves %}
+<tr>
+<td><strong>{{ c.cve }}</strong></td>
+<td><span class="access access-{{ c.level }}">{{ c.level|upper }}</span></td>
+<td><code>{{ c.tool or "—" }}</code></td>
+<td>{{ c.skill }}</td>
+<td style="font-size:0.82em">{{ c.impact }}</td>
+<td style="text-align:center">{{ c.methods_count }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</details>
+
+</body>
+</html>

@@ -1,0 +1,198 @@
+"""Phase 2 — Network discovery (Termux-friendly, no root)."""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Any
+
+from core.scope import Scope, ScopeError
+from integrations.nmap_runner import ping_sweep
+
+
+# ---------- data types ----------
+
+@dataclass
+class Device:
+    ip: str
+    mac: str | None = None
+    vendor: str | None = None
+    hostname: str | None = None
+    device_type: str = "unknown"
+    is_gateway: bool = False
+    in_arp_cache: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class DiscoveryResult:
+    subnet: str
+    devices: list[Device] = field(default_factory=list)
+    scan_method: str = "none"
+    duration_seconds: float = 0.0
+    gateway: str | None = None
+    raw_nmap: str = ""
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "subnet": self.subnet,
+            "devices": [d.to_dict() for d in self.devices],
+            "scan_method": self.scan_method,
+            "duration_seconds": self.duration_seconds,
+            "gateway": self.gateway,
+            "error": self.error,
+        }
+
+
+# ---------- ARP cache ----------
+
+def read_arp_cache() -> dict[str, str]:
+    """Read /proc/net/arp -> {ip: mac}. Skips incomplete/invalid entries."""
+    p = Path("/proc/net/arp")
+    result: dict[str, str] = {}
+    if not p.exists():
+        return result
+    try:
+        lines = p.read_text(encoding="utf-8").splitlines()[1:]
+    except Exception:
+        return result
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        ip, hwtype, flags, mac = parts[0], parts[1], parts[2], parts[3]
+        if mac in ("00:00:00:00:00:00", "00:00:00:00:00:00".lower()):
+            continue
+        if not (len(mac) == 17 and mac.count(":") == 5):
+            continue
+        result[ip] = mac.lower()
+    return result
+
+
+# ---------- classification ----------
+
+_PRINTER_HINTS = ("printer", "hp-", "canon", "epson", "brother", "xerox", "ricoh")
+_CAMERA_HINTS = ("camera", "ipcam", "hikvision", "dahua", "reolink", "axis-", "foscam")
+_MOBILE_HOSTNAME_HINTS = ("iphone", "android", "galaxy", "pixel", "ipad", "oneplus", "redmi")
+_ROUTER_HOSTNAME_HINTS = ("router", "gateway", "modem", "openwrt", "dd-wrt", "pfsense")
+
+_MOBILE_VENDOR_HINTS = (
+    "apple", "samsung", "xiaomi", "huawei", "honor", "oneplus",
+    "oppo", "vivo", "realme", "motorola", "nokia", "sony mobile",
+)
+_ROUTER_VENDOR_HINTS = (
+    "tp-link", "asus", "netgear", "d-link", "ubiquiti", "cisco",
+    "mikrotik", "zyxel", "linksys", "tenda", "mercury",
+)
+_IOT_VENDOR_HINTS = (
+    "espressif", "tuya", "shelly", "raspberry", "sonoff", "texas instruments",
+)
+
+
+def classify_device(
+    ip: str,
+    gateway: str | None,
+    hostname: str | None,
+    vendor: str | None,
+    mac: str | None = None,
+) -> str:
+    if gateway and ip == gateway:
+        return "router"
+    h = (hostname or "").lower()
+    v = (vendor or "").lower()
+    if any(k in h for k in _PRINTER_HINTS):
+        return "printer"
+    if any(k in h for k in _CAMERA_HINTS):
+        return "camera"
+    if any(k in h for k in _MOBILE_HOSTNAME_HINTS):
+        return "mobile"
+    if any(k in h for k in _ROUTER_HOSTNAME_HINTS):
+        return "router"
+    if any(k in v for k in _MOBILE_VENDOR_HINTS):
+        return "mobile"
+    if any(k in v for k in _ROUTER_VENDOR_HINTS):
+        return "router"
+    if any(k in v for k in _IOT_VENDOR_HINTS):
+        return "iot"
+    return "unknown"
+
+
+# ---------- main ----------
+
+async def discover(
+    subnet: str,
+    scope: Scope | None = None,
+    gateway: str | None = None,
+    timeout: int = 90,
+) -> DiscoveryResult:
+    """Run full discovery: nmap -sn + ARP cache + classification."""
+    start = time.monotonic()
+
+    if scope is not None:
+        try:
+            scope.require_allowed(subnet)
+        except ScopeError as e:
+            return DiscoveryResult(
+                subnet=subnet, scan_method="blocked",
+                duration_seconds=0.0, error=str(e),
+            )
+
+    hosts, raw = await ping_sweep(subnet, timeout=timeout)
+    if not hosts and raw in ("timeout", "nmap not found"):
+        return DiscoveryResult(
+            subnet=subnet, scan_method="failed",
+            duration_seconds=round(time.monotonic() - start, 2),
+            error=raw,
+        )
+
+    arp = read_arp_cache()
+
+    devices: list[Device] = []
+    seen_ips: set[str] = set()
+    for h in hosts:
+        mac = h.mac or arp.get(h.ip)
+        dt = classify_device(h.ip, gateway, h.hostname, h.vendor, mac)
+        devices.append(Device(
+            ip=h.ip,
+            mac=mac,
+            vendor=h.vendor,
+            hostname=h.hostname,
+            device_type=dt,
+            is_gateway=(h.ip == gateway),
+            in_arp_cache=(h.ip in arp),
+        ))
+        seen_ips.add(h.ip)
+
+    # ARP-only hosts
+    for ip, mac in arp.items():
+        if ip in seen_ips:
+            continue
+        devices.append(Device(
+            ip=ip,
+            mac=mac,
+            vendor=None,
+            hostname=None,
+            device_type=classify_device(ip, gateway, None, None, mac),
+            is_gateway=(ip == gateway),
+            in_arp_cache=True,
+        ))
+
+    def _ip_key(d: Device) -> tuple[int, ...]:
+        try:
+            return tuple(int(x) for x in d.ip.split("."))
+        except Exception:
+            return (999, 999, 999, 999)
+
+    devices.sort(key=_ip_key)
+
+    return DiscoveryResult(
+        subnet=subnet,
+        devices=devices,
+        scan_method="nmap_sn+arp_cache",
+        duration_seconds=round(time.monotonic() - start, 2),
+        gateway=gateway,
+        raw_nmap=raw[:4000],
+    )

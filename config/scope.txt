@@ -1,0 +1,5 @@
+# Authorized scope — ONLY these targets may be scanned.
+# One entry per line. Lines starting with '#' are ignored.
+127.0.0.1
+::1
+192.168.8.0/24
