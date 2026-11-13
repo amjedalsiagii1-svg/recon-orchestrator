@@ -1229,7 +1229,7 @@ class CLI:
         else:
             self.console.print(
                 "[yellow]Downloads غير متاح.[/yellow] نفّذ أولًا: "
-                "[bold]termux-setup-storage[/bold] (اسمح بالوصول)"
+                "[bold]chmod -R 755 reports/output[/bold] (اسمح بالوصول)"
             )
 
         # 4) عرض النتيجة
