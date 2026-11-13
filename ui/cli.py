@@ -1246,13 +1246,13 @@ class CLI:
                 f"\n[bold]نسخة في التنزيلات (لفتحها من المتصفح):[/bold]\n"
                 f"  [yellow]{downloads_dst}[/yellow]\n"
                 f"\n[dim]افتح تطبيق Files \u2192 Downloads \u2192 {filename}[/dim]\n"
-                f"[dim]أو: termux-open --content-type text/html '{downloads_dst}'[/dim]"
+                f"[dim]أو: xdg-open '{downloads_dst}'[/dim]"
             )
         else:
             body += (
                 f"\n[bold]فتح التقرير:[/bold]\n"
-                f"  termux-open --content-type text/html '{report_path}'\n"
-                f"[dim]أو انسخه يدويًا إلى /storage/emulated/0/Download/[/dim]"
+                f"  xdg-open '{report_path}'\n"
+                f"[dim]أو انسخه يدويًا إلى /home/kali/Downloads[/dim]"
             )
 
         self.console.print(
