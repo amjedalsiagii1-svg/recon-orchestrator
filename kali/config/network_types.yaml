@@ -1,0 +1,321 @@
+# قاعدة معرفة أنواع الشبكات - إصدار Kali الاحترافي
+# 25 نوع مصنف بمعايير Enterprise
+
+network_types:
+  home_router:
+    ar: "شبكة مودم منزلي"
+    en: "Home Router"
+    risk: "medium"
+    icon: "🏠"
+    description: "شبكة DSL/Fiber منزلية، غالباً ما تحتوي على ثغرات firmware"
+    recommendations:
+      - "تغيير كلمة المرور الافتراضية للوحة التحكم"
+      - "تحديث Firmware الراوتر"
+      - "استخدام WPA2/WPA3 (تجنب WEP)"
+      - "تعطيل WPS و UPnP إن لم يُستخدم"
+      - "تعطيل إدارة عن بعد (Remote Management)"
+    detection:
+      - "IP في نطاق 192.168.0.0/16 أو 10.0.0.0/8"
+      - "Gateway نمطي (192.168.1.1, 192.168.0.1)"
+
+  corporate_network:
+    ar: "شبكة مؤسسية"
+    en: "Corporate Network"
+    risk: "high"
+    icon: "🏢"
+    description: "شبكة شركة أو مؤسسة، قد تحتوي على AD و SMB ونظام مراقبة"
+    recommendations:
+      - "الشبكة مراقبة (IDS/IPS) - تجنب الفحص العشوائي"
+      - "الحصول على تصريح كتابي قبل أي فحص"
+      - "استخدام VPN للاتصال الآمن"
+      - "الالتزام بسياسة الشركة"
+    detection:
+      - "IP في نطاق 10.0.0.0/8 مع Gateway غير منزلي"
+      - "وجود خدمات Active Directory"
+
+  enterprise:
+    ar: "شبكة شركات كبرى"
+    en: "Enterprise"
+    risk: "very_high"
+    icon: "🌆"
+    description: "شبكات مؤسسات كبرى، بنية معقدة، أنظمة موزعة"
+    recommendations:
+      - "الفحص يحتاج ترخيص SOC"
+      - "قد يتضمن honeypots"
+      - "الالتزام بـ Rules of Engagement"
+    detection:
+      - "BGP/OSPF routing"
+      - "Multiple VLANs"
+
+  hotel_wifi:
+    ar: "شبكة فندق"
+    en: "Hotel WiFi"
+    risk: "high"
+    icon: "🏨"
+    description: "شبكات فنادق غالباً بها captive portal وضعف في العزل"
+    recommendations:
+      - "الشبكة مشتركة مع نزلاء آخرين - كن حذراً"
+      - "تجنب المعلومات الحساسة"
+      - "استخدم VPN دائماً"
+      - "قد يتم تسجيل MAC address"
+    detection:
+      - "Captive portal redirect"
+      - "Hostname يحتوي hotel أو resort"
+
+  airport_wifi:
+    ar: "شبكة مطار"
+    en: "Airport WiFi"
+    risk: "high"
+    icon: "✈️"
+    description: "شبكات مطارات، حركة عالية، أمنية متوسطة"
+    recommendations:
+      - "شبكة عامة - لا تثق بأي شيء"
+      - "استخدم VPN إجباري"
+      - "تجنب الخدمات المصرفية"
+      - "قد توجد شبكات evil twin"
+    detection:
+      - "SSID يحتوي airport أو free"
+      - "عدد كبير من الأجهزة"
+
+  cafe_wifi:
+    ar: "شبكة مقهى"
+    en: "Cafe WiFi"
+    risk: "medium"
+    icon: "☕"
+    description: "شبكة مقهى عامة، عادة بدون تشفير قوي"
+    recommendations:
+      - "الشبكة غير آمنة - استخدم VPN"
+      - "تجنب تسجيل الدخول لحساباتك"
+      - "افحص وجود MITM"
+    detection:
+      - "SSID تجاري (Starbucks, Costa, إلخ)"
+      - "Captive portal بسيط"
+
+  public_wifi:
+    ar: "شبكة عامة مفتوحة"
+    en: "Public Open WiFi"
+    risk: "very_high"
+    icon: "📡"
+    description: "شبكة مفتوحة بدون تشفير - أخطر أنواع الشبكات"
+    recommendations:
+      - "لا تثق بأي جهاز على الشبكة"
+      - "فعّل VPN فوراً"
+      - "أوقف مشاركة الملفات"
+      - "احذر من Evil Twin"
+      - "استخدم HTTPS فقط"
+    detection:
+      - "Open network (no encryption)"
+      - "No password required"
+
+  captive_portal:
+    ar: "شبكة بوابة تسجيل"
+    en: "Captive Portal"
+    risk: "medium"
+    icon: "🔐"
+    description: "شبكة تتطلب تسجيل دخول عبر متصفح (فنادق، مطارات، مقاهي)"
+    recommendations:
+      - "تحقق من عنوان URL للبوابة (قد يكون مزيفاً)"
+      - "لا تدخل بيانات حساسة"
+      - "استخدم كلمة مرور مؤقتة"
+    detection:
+      - "HTTP 302 redirect to login page"
+      - "DNS hijacking to portal"
+
+  mobile_hotspot:
+    ar: "نقطة اتصال جوال"
+    en: "Mobile Hotspot"
+    risk: "medium"
+    icon: "📱"
+    description: "شبكة من جوال (توزيع إنترنت)"
+    recommendations:
+      - "تأكد من كلمة مرور قوية"
+      - "راقب الأجهزة المتصلة"
+      - "أوقف Hotspot عند عدم الاستخدام"
+    detection:
+      - "Gateway من نطاق 172.20.10.x (iOS) أو 192.168.43.x (Android)"
+      - "SSID يحتوي iPhone أو AndroidAP"
+
+  mesh_network:
+    ar: "شبكة Mesh"
+    en: "Mesh Network"
+    risk: "medium"
+    icon: "🕸️"
+    description: "شبكة موزعة (Eero, Google WiFi, Deco)"
+    recommendations:
+      - "تحقق من تحديثات كل عقدة"
+      - "راقب الأجهزة الغريبة"
+      - "غيّر كلمة مرور لوحة التحكم"
+    detection:
+      - "Multiple gateways"
+      - "SSID بتقنية mesh"
+
+  vpn_tunnel:
+    ar: "نفق VPN"
+    en: "VPN Tunnel"
+    risk: "low"
+    icon: "🛡️"
+    description: "اتصال مشفر عبر VPN"
+    recommendations:
+      - "تحقق من مزود VPN الموثوق"
+      - "راقب تسريبات DNS"
+      - "لا تعتمد على VPN وحده"
+    detection:
+      - "TUN/TAP interface"
+      - "Encrypted traffic"
+
+  ad_hoc:
+    ar: "شبكة Ad-Hoc"
+    en: "Ad-Hoc Network"
+    risk: "high"
+    icon: "🔗"
+    description: "شبكة مباشرة بين أجهزة بدون راوتر"
+    recommendations:
+      - "غير مشفرة عادةً"
+      - "استخدمها فقط للثقة العالية"
+    detection:
+      - "No gateway"
+      - "Peer-to-peer"
+
+  iot_network:
+    ar: "شبكة إنترنت الأشياء"
+    en: "IoT Network"
+    risk: "high"
+    icon: "🌐"
+    description: "شبكة أجهزة ذكية (كاميرات، أجهزة منزل ذكي)"
+    recommendations:
+      - "أجهزة IoT غالباً بثغرات"
+      - "غيّر كلمات المرور الافتراضية"
+      - "عزّل شبكة IoT عن الشبكة الرئيسية"
+      - "حدّث Firmware باستمرار"
+    detection:
+      - "Vendor IoT (Ring, Nest, Philips Hue)"
+      - "MAC OUI خاصة بـ IoT"
+
+  industrial_network:
+    ar: "شبكة صناعية (ICS/SCADA)"
+    en: "Industrial Network"
+    risk: "critical"
+    icon: "🏭"
+    description: "شبكات صناعية - لا تفحص بدون تصريح رسمي"
+    recommendations:
+      - "لا تفحص بدون تصريح كتابي رسمي"
+      - "الفحص قد يسبب أضراراً فيزيائية"
+      - "استخدام أدوات ICS محددة"
+      - "الإبلاغ عن أي عطل فوراً"
+    detection:
+      - "Protocols: Modbus, DNP3, Profinet"
+      - "Vendor: Siemens, Schneider, Rockwell"
+
+  educational_network:
+    ar: "شبكة تعليمية"
+    en: "Educational Network"
+    risk: "medium"
+    icon: "🎓"
+    description: "شبكة جامعة أو مدرسة"
+    recommendations:
+      - "قد تكون مراقبة"
+      - "تجنب الفحص في أوقات الذروة"
+      - "التزم بسياسة الجامعة"
+    detection:
+      - "SSID يحتوي uni, edu, campus"
+      - "Domain: .edu"
+
+  hospital_network:
+    ar: "شبكة مستشفى"
+    en: "Hospital Network"
+    risk: "critical"
+    icon: "🏥"
+    description: "شبكة مستشفى - تحتوي أجهزة طبية حساسة"
+    recommendations:
+      - "لا تفحص بدون تصريح طبي رسمي"
+      - "أي فحص قد يعرض حياة المرضى للخطر"
+      - "الالتزام بـ HIPAA / GDPR"
+    detection:
+      - "Medical device vendors (Philips, GE Healthcare)"
+      - "DICOM protocols"
+
+  government_network:
+    ar: "شبكة حكومية"
+    en: "Government Network"
+    risk: "critical"
+    icon: "🏛️"
+    description: "شبكة حكومية - أمن عالي جداً"
+    recommendations:
+      - "الفحص = جريمة بدون تصريح"
+      - "احصل على ترخيص من الجهة المختصة"
+    detection:
+      - "Domain: .gov"
+      - "Air-gapped systems"
+
+  isp_network:
+    ar: "شبكة مزود خدمة"
+    en: "ISP Network"
+    risk: "very_high"
+    icon: "📡"
+    description: "شبكة مزود خدمة الإنترنت"
+    recommendations:
+      - "الفحص = انتهاك قانوني"
+      - "التواصل مع مزود الخدمة أولاً"
+    detection:
+      - "Public IPs"
+      - "BGP routing"
+
+  restaurant_wifi:
+    ar: "شبكة مطعم"
+    en: "Restaurant WiFi"
+    risk: "medium"
+    icon: "🍽️"
+    description: "شبكة مطعم عامة"
+    recommendations:
+      - "استخدم VPN"
+      - "تجنب الدفع الإلكتروني"
+    detection:
+      - "SSID مطعم"
+      - "Captive portal بسيط"
+
+  library_wifi:
+    ar: "شبكة مكتبة"
+    en: "Library WiFi"
+    risk: "medium"
+    icon: "📚"
+    description: "شبكة مكتبة عامة"
+    recommendations:
+      - "قد تكون مراقبة"
+      - "تجنب الأنشطة الحساسة"
+    detection:
+      - "SSID يحتوي library"
+
+  co_working:
+    ar: "شبكة عمل مشترك"
+    en: "Co-working Space"
+    risk: "medium"
+    icon: "💼"
+    description: "شبكة مساحة عمل مشتركة"
+    recommendations:
+      - "شبكة مشتركة مع غرباء"
+      - "استخدم VPN"
+    detection:
+      - "SSID يحتوي WeWork أو ما شابه"
+
+  museum_wifi:
+    ar: "شبكة متحف"
+    en: "Museum WiFi"
+    risk: "low"
+    icon: "🏛️"
+    description: "شبكة متحف عامة"
+    recommendations:
+      - "استخدم VPN للسفراء"
+    detection:
+      - "SSID يحتوي museum"
+
+  stadium_wifi:
+    ar: "شبكة ملعب"
+    en: "Stadium WiFi"
+    risk: "high"
+    icon: "🏟️"
+    description: "شبكة ملعب - ازدحام شديد"
+    recommendations:
+      - "شبكة مزدحمة - قد تكون بطيئة"
+      - "تجنب المعلومات الحساسة"
+    detection:
+      - "عدد كبير من الأجهزة (>1000)"

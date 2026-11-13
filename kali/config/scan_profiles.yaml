@@ -1,0 +1,50 @@
+scan_profiles:
+  quick:
+    args: ["-T4", "-F", "-sV", "-Pn", "-sC"]
+    description: "Top 100 ports + scripts"
+    estimated: "30-90s"
+  
+  comprehensive:
+    args: ["-T4", "-p-", "-sV", "-Pn", "-sC"]
+    description: "Full TCP + service detection"
+    estimated: "5-30 min"
+  
+  stealth:
+    args: ["-sS", "-T2", "-F", "-Pn", "--randomize-hosts"]
+    description: "SYN stealth with timing"
+    estimated: "1-3 min"
+  
+  udp:
+    args: ["-sU", "--top-ports", "100", "-Pn"]
+    description: "Top 100 UDP ports"
+    estimated: "1-5 min"
+  
+  nse:
+    args: ["-T4", "-F", "-sV", "-sC", "--script", "default,safe,vuln"]
+    description: "NSE default+safe+vuln scripts"
+    estimated: "2-10 min"
+  
+  full:
+    args: ["-T4", "-p-", "-sV", "-sC", "--script", "default"]
+    description: "Full TCP + scripts"
+    estimated: "10-40 min"
+  
+  aggressive:
+    args: ["-T4", "-A", "-p-", "-Pn"]
+    description: "Aggressive (OS, version, scripts, traceroute)"
+    estimated: "15-45 min"
+  
+  web_focused:
+    args: ["-T4", "-p", "80,443,8000,8080,8443,8888,9000,9090,3000,5000", "-sV", "-Pn", "-sC"]
+    description: "Web app focused scan"
+    estimated: "2-5 min"
+  
+  database_focused:
+    args: ["-T4", "-p", "1433,3306,5432,27017,6379,9200,5984", "-sV", "-Pn"]
+    description: "Database services"
+    estimated: "1-3 min"
+  
+  smb_focused:
+    args: ["-T4", "-p", "139,445,135,389,636,3268,3269", "-sV", "-Pn", "--script", "smb-enum-shares,smb-enum-users,smb-os-discovery"]
+    description: "SMB/AD services"
+    estimated: "2-8 min"
