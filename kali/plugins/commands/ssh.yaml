@@ -1,0 +1,14 @@
+service: ssh
+port: 22
+commands:
+  version_check:
+    - "nmap -sV -p22 {target}"
+    - "ssh -V"
+  user_enum:
+    - "ssh-keyscan {target}"
+    - "nmap -p22 --script ssh-auth-methods {target}"
+  auth_test:
+    - "hydra -L users.txt -P pass.txt ssh://{target}"
+  vulnerabilities:
+    - "searchsploit openssh"
+    - "nmap -p22 --script ssh2-enum-algos,ssh-hostkey,ssh-run {target}"

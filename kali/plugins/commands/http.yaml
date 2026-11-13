@@ -1,0 +1,19 @@
+service: http
+port: 80
+commands:
+  basic_recon:
+    - "curl -I http://{target}"
+    - "whatweb http://{target}"
+    - "nikto -h http://{target}"
+  directory_bruteforce:
+    - "gobuster dir -u http://{target} -w /usr/share/wordlists/dirb/common.txt"
+    - "feroxbuster -u http://{target} -w /usr/share/seclists/Discovery/Web-Content/common.txt"
+  cms_scan:
+    - "wpscan --url http://{target} --enumerate vp,vt,u"
+    - "joomscan -u http://{target}"
+    - "droopescan scan drupal -u http://{target}"
+  ssl_scan:
+    - "sslscan {target}:443"
+    - "testssl.sh {target}"
+  vulnerabilities:
+    - "nmap -p80 --script http-vuln* {target}"

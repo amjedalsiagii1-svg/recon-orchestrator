@@ -1,0 +1,10 @@
+service: dns
+port: 53
+commands:
+  enum:
+    - "dig @{target} version.bind chaos txt"
+    - "nmap -p53 --script dns-recursion,dns-service-discovery {target}"
+    - "dnsrecon -d example.com -n {target}"
+  zone_transfer:
+    - "dig @{target} axfr example.com"
+    - "dnsenum --dnsserver {target} example.com"

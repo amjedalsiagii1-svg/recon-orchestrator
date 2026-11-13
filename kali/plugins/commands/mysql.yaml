@@ -1,0 +1,9 @@
+service: mysql
+port: 3306
+commands:
+  connect:
+    - "mysql -h {target} -u root -p"
+  brute_force:
+    - "hydra -L users.txt -P pass.txt mysql://{target}"
+  enum:
+    - "nmap -p3306 --script mysql-enum,mysql-info,mysql-users {target}"

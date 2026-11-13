@@ -1,0 +1,9 @@
+service: rdp
+port: 3389
+commands:
+  recon:
+    - "nmap -p3389 --script rdp-enum-encryption,rdp-vuln-ms12-020 {target}"
+  brute_force:
+    - "hydra -L users.txt -P pass.txt rdp://{target}"
+  vulnerabilities:
+    - "nmap -p3389 --script rdp-vuln* {target}"

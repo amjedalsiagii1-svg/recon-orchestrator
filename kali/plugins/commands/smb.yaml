@@ -1,0 +1,13 @@
+service: smb
+port: 445
+commands:
+  enum:
+    - "enum4linux -a {target}"
+    - "smbclient -L //{target}/ -N"
+    - "smbmap -H {target}"
+    - "nmap -p139,445 --script smb-enum-shares,smb-enum-users,smb-os-discovery {target}"
+  shares_access:
+    - "smbclient //{target}/share_name -N"
+  vulnerabilities:
+    - "nmap -p139,445 --script smb-vuln* {target}"
+    - "nmap -p445 --script smb-vuln-ms17-010 {target}"

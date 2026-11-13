@@ -1,0 +1,12 @@
+service: ftp
+port: 21
+commands:
+  connect:
+    - "ftp {target}"
+    - "nc -v {target} 21"
+  anonymous:
+    - "curl ftp://anonymous:test@{target}/"
+  brute_force:
+    - "hydra -L users.txt -P pass.txt ftp://{target}"
+  vulnerabilities:
+    - "nmap -p21 --script ftp-anon,ftp-bounce,ftp-vuln* {target}"
