@@ -96,10 +96,71 @@ def _install_output_hook():
 
 
 # Install hook BEFORE importing ui.cli
+if _show_service_commands_hook():
+    print("\033[92mCommands Hook installed\033[0m")
 if _install_output_hook():
     print("\033[92m✅ Kali Edition: Output Interception Hook installed\033[0m")
 else:
     print("\033[91m⚠️ Kali Edition: hook failed\033[0m")
+
+
+
+# ---- Service Commands Hook ----
+def _show_service_commands_hook():
+    """After P4 port scan, show commands for detected services"""
+    try:
+        import os, yaml
+        from rich.console import Console
+        from rich.panel import Panel
+        
+        def _find_service_yaml(service_name):
+            cmd_dir = os.path.join(_here, "kali", "plugins", "commands")
+            if not os.path.exists(cmd_dir):
+                return None
+            fpath = os.path.join(cmd_dir, f"{service_name}.yaml")
+            if os.path.exists(fpath):
+                return fpath
+            return None
+        
+        def _display_cmds(service_name):
+            fpath = _find_service_yaml(service_name)
+            if not fpath:
+                return
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            cmds = data.get("commands", {})
+            console = Console()
+            output = ""
+            for cat, clist in cmds.items():
+                output += f"\n[bold yellow]{cat.replace('_',' ').title()}:[/bold yellow]\n"
+                for c in clist[:3]:
+                    output += f"  [green]{c}[/green]\n"
+            console.print(Panel(output, title=f"Commands for {service_name}", border_style="green"))
+        
+        import rich.console as rc
+        _orig = rc.Console.print
+        _seen = set()
+        
+        def _patched(self, *args, **kwargs):
+            _orig(self, *args, **kwargs)
+            try:
+                for arg in args:
+                    text = str(arg)
+                    # Detect service in port scan output
+                    if "Port" in text and "Service" in text:
+                        continue
+                    for svc in ("ssh", "ftp", "http", "smb", "mysql", "rdp", "dns"):
+                        if svc in text.lower() and svc not in _seen:
+                            _seen.add(svc)
+                            _display_cmds(svc)
+                            break
+            except Exception:
+                pass
+        
+        rc.Console.print = _patched
+        return True
+    except Exception:
+        return False
 
 from ui.cli import main
 sys.exit(main())
