@@ -1,7 +1,7 @@
-"""Kali Edition launcher - Multi-strategy hook with diagnostics"""
+"""Kali Edition launcher - Output interception strategy"""
 import sys
 import os
-import inspect
+import re
 
 _here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _here not in sys.path:
@@ -11,45 +11,24 @@ os.environ.setdefault("RECON_ENV", "kali")
 os.environ.setdefault("RECON_CONFIG_DIR", os.path.join(_here, "kali", "config"))
 
 
-def _extract_network_type(result):
-    if result is None:
-        return None
-    if isinstance(result, str):
-        return result
-    for attr in ("network_type", "classification", "type"):
-        v = getattr(result, attr, None)
-        if v:
-            return v
-    if isinstance(result, dict):
-        for k in ("network_type", "classification", "type"):
-            if k in result and result[k]:
-                return result[k]
-    if isinstance(result, tuple):
-        for item in result:
-            v = _extract_network_type(item)
-            if v:
-                return v
-    return None
-
-
-def _show_extended(result):
+def _show_extended_panel(network_type):
+    """عرض اللوحة العربية الموسعة"""
     try:
-        network_type = _extract_network_type(result)
-        if not network_type:
-            if os.environ.get("KALI_DEBUG"):
-                print(f"\033[93m[KALI DEBUG] result={type(result).__name__} attrs={[a for a in dir(result) if not a.startswith('_')][:8]}\033[0m")
-            return
         import yaml
         from rich.console import Console
         from rich.panel import Panel
-        config_dir = os.environ.get("RECON_CONFIG_DIR", "kali/config")
+        config_dir = os.environ.get("RECON_CONFIG_DIR", os.path.join(_here, "kali", "config"))
         yaml_path = os.path.join(config_dir, "network_types.yaml")
         if not os.path.exists(yaml_path):
+            if os.environ.get("KALI_DEBUG"):
+                print(f"[KALI] yaml not found: {yaml_path}")
             return
         with open(yaml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f).get("network_types", {})
         info = data.get(str(network_type))
         if not info:
+            if os.environ.get("KALI_DEBUG"):
+                print(f"[KALI] no info for: {network_type}")
             return
         icon = info.get("icon", "🔍")
         ar = info.get("ar", network_type)
@@ -68,36 +47,59 @@ def _show_extended(result):
         Console().print(Panel(msg, title=f"📡 Kali Edition — {icon} {ar}", border_style="cyan"))
     except Exception as e:
         if os.environ.get("KALI_DEBUG"):
-            print(f"\033[91m[KALI ERROR] {e}\033[0m")
+            print(f"[KALI] show error: {e}")
 
 
-# STRATEGY 1: Hook p1_network_type
-_hooked = False
-try:
-    import phases.p1_network_type as p1
-    for fn_name in ('detect', 'run', 'classify', 'analyze', 'detect_network_type'):
-        if hasattr(p1, fn_name) and callable(getattr(p1, fn_name)):
-            _orig = getattr(p1, fn_name)
-            _is_async = inspect.iscoroutinefunction(_orig)
-            if _is_async:
-                async def _wrapped(*a, __orig=_orig, **kw):
-                    r = await __orig(*a, **kw)
-                    _show_extended(r)
-                    return r
-            else:
-                def _wrapped(*a, __orig=_orig, **kw):
-                    r = __orig(*a, **kw)
-                    _show_extended(r)
-                    return r
-            setattr(p1, fn_name, _wrapped)
-            print(f"\033[92m✅ Kali Edition: hooked p1.{fn_name}\033[0m")
-            _hooked = True
-            break
-    if not _hooked:
-        funcs = [a for a in dir(p1) if not a.startswith('_') and callable(getattr(p1, a)) and not isinstance(getattr(p1, a), type)]
-        print(f"\033[93m⚠ Kali Edition: p1 functions = {funcs}\033[0m")
-except Exception as e:
-    print(f"\033[91m⚠ Kali Edition: {e}\033[0m")
+def _install_output_hook():
+    """Intercept Console.print and detect classification panel"""
+    try:
+        import rich.console as rc
+        _orig_print = rc.Console.print
+        _seen_types = set()
+
+        def _render_to_text(console, obj):
+            """Render rich object to plain text"""
+            try:
+                import io
+                buf = io.StringIO()
+                tmp_console = rc.Console(record=True, width=250, file=buf, force_terminal=False)
+                _orig_print(tmp_console, obj)
+                return tmp_console.export_text()
+            except Exception:
+                return str(obj)
+
+        def _patched_print(self, *args, **kwargs):
+            _orig_print(self, *args, **kwargs)
+            try:
+                for arg in args:
+                    text = _render_to_text(self, arg)
+                    # Look for network_type classification output
+                    m = re.search(r'(?:Type|النوع):\s*([a-z_]+)', text)
+                    if m:
+                        ntype = m.group(1)
+                        # Only show if it's a known extended type not yet shown
+                        if ntype in _seen_types:
+                            continue
+                        _seen_types.add(ntype)
+                        _show_extended_panel(ntype)
+                        break
+            except Exception as e:
+                if os.environ.get("KALI_DEBUG"):
+                    print(f"[KALI] print hook: {e}")
+
+        rc.Console.print = _patched_print
+        return True
+    except Exception as e:
+        if os.environ.get("KALI_DEBUG"):
+            print(f"[KALI] hook install error: {e}")
+        return False
+
+
+# Install hook BEFORE importing ui.cli
+if _install_output_hook():
+    print("\033[92m✅ Kali Edition: Output Interception Hook installed\033[0m")
+else:
+    print("\033[91m⚠️ Kali Edition: hook failed\033[0m")
 
 from ui.cli import main
 sys.exit(main())
