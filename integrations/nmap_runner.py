@@ -18,7 +18,7 @@ class NmapHost:
 async def ping_sweep(subnet: str, timeout: int = 90) -> tuple[list[NmapHost], str]:
     """Run nmap -sn <subnet>. Returns (hosts, raw_output). No root required."""
     cmd = [
-        "nmap", "-sn", "-T4",
+        "nmap", "-sn", "-PR", "-PS22,80,443", "-T4",
         "--max-retries", "1",
         "--host-timeout", "15s",
         "--initial-rtt-timeout", "500ms",
