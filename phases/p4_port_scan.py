@@ -14,12 +14,12 @@ from integrations.nmap_runner import scan_ports_xml
 
 PROFILES: dict[str, dict[str, Any]] = {
     "quick": {
-        "args": ["-sT", "-T4", "-F", "-sV", "--version-light"],
+        "args": ["-sT", "-T4", "-F", "-Pn", "-sV", "--version-light"],
         "description": "Top 100 ports + light service detection",
         "estimated": "30-90s",
     },
     "comprehensive": {
-        "args": ["-sT", "-T4", "-p-", "-sV"],
+        "args": ["-sT", "-T4", "-p-", "-Pn", "-sV"],
         "description": "Full TCP 1-65535 + service detection",
         "estimated": "5-30 min",
     },
@@ -39,7 +39,7 @@ PROFILES: dict[str, dict[str, Any]] = {
         "estimated": "2-10 min",
     },
     "full": {
-        "args": ["-sT", "-T4", "-p-", "-sV", "-sC"],
+        "args": ["-sT", "-T4", "-p-", "-Pn", "-sV", "-sC"],
         "description": "Full TCP + default scripts",
         "estimated": "10-40 min",
     },
