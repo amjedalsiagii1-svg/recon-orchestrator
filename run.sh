@@ -6,10 +6,12 @@ echo "2) Termux (Android / No Root)"
 echo "===================================="
 read -p "Choice [1-2]: " env_choice
 if [ "$env_choice" == "2" ]; then
-    export RECON_MODE="termux"
+    export RECON_ENV="termux"
     if [ -d "venv" ]; then source venv/bin/activate; fi
     python3 -m ui.cli "$@"
 else
-    export RECON_MODE="kali"
-    sudo -E env PATH="$PATH" venv/bin/python3 -m ui.cli "$@"
+    export RECON_ENV="kali"
+    export RECON_CONFIG_DIR="kali/config"
+    if [ -d "venv" ]; then source venv/bin/activate; fi
+    sudo -E env PATH="$PATH" RECON_ENV="kali" RECON_CONFIG_DIR="kali/config" python3 -m kali.launcher "$@"
 fi
