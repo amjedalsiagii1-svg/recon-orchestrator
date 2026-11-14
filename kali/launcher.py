@@ -96,6 +96,8 @@ def _install_output_hook():
 
 
 # Install hook BEFORE importing ui.cli
+if _install_playbook_hook():
+    print("\033[92mPlaybook Hook installed\033[0m")
 if _show_service_commands_hook():
     print("\033[92mCommands Hook installed\033[0m")
 if _install_output_hook():
@@ -157,6 +159,61 @@ def _show_service_commands_hook():
             except Exception:
                 pass
         
+        rc.Console.print = _patched
+        return True
+    except Exception:
+        return False
+
+
+
+# ---- Playbook Auto-Hook after P4 ----
+def _install_playbook_hook():
+    """Intercept P4 port scan output and show playbook"""
+    try:
+        import re
+        import rich.console as rc
+        _orig = rc.Console.print
+        _last_scan = {"target": None, "ports": [], "shown": False}
+
+        def _extract_ports(text):
+            """Extract port numbers from port scan table"""
+            ports = []
+            for m in re.finditer(r'│\s*(\d{2,5})\s*│\s*(tcp|udp)', text):
+                try:
+                    ports.append(int(m.group(1)))
+                except (ValueError, IndexError):
+                    pass
+            return ports
+
+        def _patched(self, *args, **kwargs):
+            _orig(self, *args, **kwargs)
+            try:
+                for arg in args:
+                    txt = str(arg)
+                    # Look for port scan result table
+                    if "Open Ports" in txt or "profile:" in txt:
+                        ports = _extract_ports(txt)
+                        if ports:
+                            _last_scan["ports"] = ports
+                            _last_scan["shown"] = False
+                    # When "Risk Summary" appears (end of scan), show playbook
+                    if "Risk Summary" in txt or "ملخص الخطورة" in txt:
+                        if _last_scan["ports"] and not _last_scan["shown"]:
+                            _last_scan["shown"] = True
+                            try:
+                                from kali.playbook import build_playbook, display_playbook, save_playbook
+                                import os
+                                target = None
+                                # Try to get target from env or default
+                                target = os.environ.get("RECON_TARGET", "<target>")
+                                pb = build_playbook(_last_scan["ports"], target)
+                                if pb:
+                                    display_playbook(pb, target)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
         rc.Console.print = _patched
         return True
     except Exception:

