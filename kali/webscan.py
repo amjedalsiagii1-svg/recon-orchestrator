@@ -34,7 +34,7 @@ def whatweb(url):
     if not has_tool('whatweb'):
         console.print("[yellow]whatweb not installed[/yellow]")
         return
-    ok, out, err = run(['whatweb', '-q', '--color=never', url], timeout=60)
+    ok, out, err = run(['whatweb', '-a', '3', '--color=never', '--no-errors', url], timeout=90)
     if out.strip():
         for part in out.strip().split(','):
             console.print(f"  [white]{part.strip()}[/white]")
@@ -44,9 +44,10 @@ def whatweb(url):
 
 def headers(url):
     section(2, "HTTP Headers Analysis")
-    ok, out, err = run(['curl', '-sI', '--max-time', '15', url], timeout=20)
+    ok, out, err = run(['curl', '-sIL', '--max-time', '15', url], timeout=20)
     if not out.strip():
-        console.print("[red]No response[/red]")
+        console.print("[red]No response - check network/URL[/red]")
+        console.print("[dim]Note: example.com needs internet. Try 192.168.x.x for local.[/dim]")
         return
     interesting = []
     for line in out.strip().split('\n'):
@@ -95,7 +96,7 @@ def sensitive_paths(url):
 
 def cms_detect(url):
     section(4, "CMS Detection")
-    ok, out, err = run(['curl', '-s', '--max-time', '15', url], timeout=20)
+    ok, out, err = run(['curl', '-sL', '--max-time', '15', url], timeout=20)
     if not out:
         return
     html = out.lower()

@@ -143,10 +143,58 @@ def _install_playbook_hook():
         return False
 
 
+
+
+# ---- Auto-suggest Web Scan after P4 ----
+def _suggest_webscan_hook():
+    try:
+        import rich.console as rc
+        from rich.panel import Panel
+        _orig = rc.Console.print
+        state = {"ports": [], "target": None, "suggested": False}
+
+        def _patched(self, *args, **kwargs):
+            _orig(self, *args, **kwargs)
+            try:
+                for arg in args:
+                    txt = str(arg)
+                    import re as _re
+                    m = _re.search(r'(?:Target|\u0627\u0644\u0647\u062f\u0641)\s*[:/]?\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', txt)
+                    if m:
+                        state["target"] = m.group(1)
+                    for pm in _re.finditer(r'\u2502\s*(\d{2,5})\s*\u2502\s*(tcp|udp)', txt):
+                        try:
+                            state["ports"].append(int(pm.group(1)))
+                        except (ValueError, IndexError):
+                            pass
+                    if ("Risk Summary" in txt or "\u0645\u0644\u062e\u0635 \u0627\u0644\u062e\u0637\u0648\u0631\u0629" in txt) and not state["suggested"]:
+                        http_ports = [p for p in state["ports"] if p in (80, 443, 8080, 8443, 3000, 5000, 8000, 9000)]
+                        if http_ports and state["target"]:
+                            state["suggested"] = True
+                            msg = (
+                                f"[bold yellow]\ud83c\udf10 WEB SERVICE DETECTED[/bold yellow]\n\n"
+                                f"Target: [cyan]{state['target']}[/cyan]\n"
+                                f"HTTP ports: [green]{', '.join(map(str, http_ports))}[/green]\n\n"
+                                f"[bold]Run web scan now?[/bold]\n"
+                                f"  [green]bash kali/webscan.sh {state['target']}[/green]\n\n"
+                                f"[dim]Or with --fast for quick scan:[/dim]\n"
+                                f"  [green]bash kali/webscan.sh {state['target']} --fast[/green]"
+                            )
+                            rc.Console().print(Panel(msg, title="\ud83d\udd0d Web Recon Available", border_style="yellow"))
+            except Exception:
+                pass
+
+        rc.Console.print = _patched
+        return True
+    except Exception:
+        return False
+
 # ============================================================
 # INSTALL HOOKS (order matters for chaining)
 # ============================================================
 _hooks_installed = []
+if _suggest_webscan_hook():
+    _hooks_installed.append("webscan-suggest")
 if _install_playbook_hook():
     _hooks_installed.append("playbook")
 if _install_output_hook():
