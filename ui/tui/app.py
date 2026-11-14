@@ -1,40 +1,178 @@
-"""Recon Orchestrator - Professional TUI (Textual)"""
+"""Recon Orchestrator - Modern TUI v2"""
 import asyncio
 import os
-import sys
-from rich.console import Console
-
 from textual import work
 from textual.app import App, ComposeResult
 from textual.widgets import (
     Header, Footer, TabbedContent, TabPane, DataTable, Button,
-    Static, RichLog, Input, Label, LoadingIndicator,
+    Static, RichLog, Input, Label, ProgressBar,
 )
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 
 from ui.tui.registry import get_phases
+from ui.tui.subprocess_runner import run_phase_isolated
 
 
 class PhaseTab(Container):
-    """A single phase tab: Run button + input (optional) + output log."""
+    """Self-contained phase: handles its own button clicks."""
 
     def __init__(self, spec, app_state):
         super().__init__(id=f"tab-{spec.key}")
         self.spec = spec
         self.app_state = app_state
+        self._running = False
 
     def compose(self) -> ComposeResult:
-        yield Label(f"[bold]{self.spec.arabic}[/bold] — {self.spec.english}",
-                    classes="phase-title")
-        yield Static(self.spec.description, classes="phase-desc")
+        with Vertical(classes="card"):
+            yield Label(f"{self.spec.icon}  {self.spec.arabic}", classes="card-title")
+            yield Label(self.spec.english, classes="card-subtitle")
+            yield Static(self.spec.description_ar, classes="card-desc")
         with Horizontal(classes="controls"):
             if self.spec.has_input:
-                yield Input(placeholder=self.spec.input_placeholder, id=f"input-{self.spec.key}")
-            yield Button(f"Run Phase {self.spec.number}", id=f"btn-{self.spec.key}", variant="success")
-        yield Static("", id=f"status-{self.spec.key}", classes="status")
-        yield RichLog(id=f"log-{self.spec.key}", highlight=True, markup=True, wrap=True)
+                yield Input(
+                    placeholder=self.spec.input_placeholder,
+                    id=f"input-{self.spec.key}",
+                    classes="target-input",
+                )
+            yield Button(
+                f"▶  تشغيل المرحلة {self.spec.number}",
+                id=f"btn-{self.spec.key}",
+                classes="run-btn",
+            )
+            yield Button(
+                "✕  مسح",
+                id=f"clear-{self.spec.key}",
+                classes="clear-btn",
+            )
+        yield Static("● جاهز", id=f"status-{self.spec.key}", classes="status ready")
+        yield ProgressBar(id=f"progress-{self.spec.key}", show_eta=False)
+        with ScrollableContainer(classes="log-box"):
+            yield RichLog(id=f"log-{self.spec.key}", highlight=True, markup=True, wrap=True,
+                          classes="phase-log")
+        yield Container(id=f"results-{self.spec.key}", classes="results")
 
-    def get_input_value(self) -> str:
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        bid = event.button.id or ""
+        if bid == f"btn-{self.spec.key}":
+            self._start()
+        elif bid == f"clear-{self.spec.key}":
+            self._clear()
+
+    def _start(self):
+        if self._running:
+            self._log("[yellow]⚠ المرحلة قيد التشغيل[/yellow]")
+            return
+        self._running = True
+        self._work()
+
+    @work(exclusive=True)
+    async def _work(self):
+        try:
+            self._status(f"⏳ جاري التشغيل...", "running")
+            self._progress(True)
+            self._log(f"[bold cyan]{'━'*55}[/bold cyan]")
+            self._log(f"[bold cyan]▶  {self.spec.arabic} / {self.spec.english}[/bold cyan]")
+
+            target = self._get_input()
+            result = await asyncio.to_thread(
+                run_phase_isolated, self.spec.key, target
+            )
+
+            output = result.get("output", "")
+            if output:
+                for line in output.splitlines():
+                    if "__JSON_" in line:
+                        continue
+                    self._log(line)
+
+            if result.get("ok"):
+                self._status(f"✓  اكتملت بنجاح", "ok")
+                self._log("[bold green]✓  المرحلة اكتملت[/bold green]")
+                self._render(result.get("result"))
+            else:
+                self._status(f"✗  فشلت", "err")
+                self._log("[bold red]✗  المرحلة فشلت[/bold red]")
+        except Exception as e:
+            self._status(f"✗ خطأ: {e}", "err")
+            self._log(f"[red]Exception: {type(e).__name__}: {e}[/red]")
+        finally:
+            self._running = False
+            self._progress(False)
+
+    def _render(self, data):
+        if not data:
+            return
+        try:
+            container = self.query_one(f"#results-{self.spec.key}", Container)
+            for w in list(container.children):
+                w.remove()
+
+            if self.spec.key == "network" and isinstance(data, dict):
+                ntype = data.get("network_type") or data.get("classification") or "unknown"
+                conf = data.get("confidence", 0)
+                try:
+                    conf_pct = float(conf) * 100
+                except (ValueError, TypeError):
+                    conf_pct = 0
+                panel = Static(
+                    f"[bold cyan]النوع:[/bold cyan]  {ntype}\n"
+                    f"[bold cyan]الثقة:[/bold cyan]  {conf_pct:.0f}%",
+                    classes="result-panel",
+                )
+                container.mount(panel)
+            elif self.spec.key == "discovery" and isinstance(data, list):
+                table = DataTable()
+                table.add_columns("IP", "MAC", "المصنّع", "النوع")
+                for d in data:
+                    table.add_row(
+                        str(d.get("ip", "?")),
+                        str(d.get("mac", "-"))[:17],
+                        str(d.get("vendor", "-"))[:28],
+                        str(d.get("device_type", "unknown")),
+                    )
+                container.mount(table)
+            elif self.spec.key == "ports" and isinstance(data, dict):
+                ports = data.get("ports", [])
+                if ports:
+                    table = DataTable()
+                    table.add_columns("المنفذ", "البروتوكول", "الخدمة", "الإصدار", "الخطورة")
+                    for p in ports:
+                        ver = f"{p.get('product', '')} {p.get('version', '')}".strip()
+                        table.add_row(
+                            str(p.get("port", "?")),
+                            str(p.get("protocol", p.get("proto", "?"))),
+                            str(p.get("service", "?")),
+                            ver[:30] or "-",
+                            str(p.get("risk", "?")),
+                        )
+                    container.mount(table)
+                else:
+                    container.mount(Static("[yellow]لا توجد منافذ مفتوحة[/yellow]"))
+            elif self.spec.key == "vulns" and isinstance(data, list):
+                table = DataTable()
+                table.add_columns("CVE", "الخطورة", "CVSS", "المنفذ")
+                for v in data:
+                    table.add_row(
+                        str(v.get("cve", "?")),
+                        str(v.get("severity", "?")),
+                        str(v.get("cvss", "?")),
+                        str(v.get("port", "?")),
+                    )
+                container.mount(table)
+            elif self.spec.key == "exploit" and isinstance(data, list):
+                table = DataTable()
+                table.add_columns("CVE", "CVSS", "المنفذ")
+                for p in data:
+                    table.add_row(
+                        str(p.get("cve", "?")),
+                        str(p.get("cvss", "?")),
+                        str(p.get("port", "?")),
+                    )
+                container.mount(table)
+        except Exception as e:
+            self._log(f"[yellow]ملاحظة عرض: {e}[/yellow]")
+
+    def _get_input(self):
         if not self.spec.has_input:
             return ""
         try:
@@ -42,266 +180,124 @@ class PhaseTab(Container):
         except Exception:
             return ""
 
-    def set_status(self, msg: str, kind: str = "info"):
-        color = {"info": "cyan", "ok": "green", "err": "red"}.get(kind, "white")
+    def _status(self, msg, kind):
         try:
-            self.query_one(f"#status-{self.spec.key}", Static).update(
-                f"[{color}]{msg}[/{color}]"
-            )
+            s = self.query_one(f"#status-{self.spec.key}", Static)
+            s.update(msg)
+            s.remove_class("ready", "running", "ok", "err")
+            s.add_class(kind)
         except Exception:
             pass
 
-    def log(self, text: str):
+    def _log(self, text):
         try:
             self.query_one(f"#log-{self.spec.key}", RichLog).write(text)
         except Exception:
             pass
 
+    def _progress(self, on):
+        try:
+            pb = self.query_one(f"#progress-{self.spec.key}", ProgressBar)
+            pb.display = on
+            if on:
+                pb.advance(40)
+            else:
+                pb.update(progress=0)
+        except Exception:
+            pass
+
+    def _clear(self):
+        try:
+            self.query_one(f"#log-{self.spec.key}", RichLog).clear()
+            c = self.query_one(f"#results-{self.spec.key}", Container)
+            for w in list(c.children):
+                w.remove()
+            self._status("● جاهز", "ready")
+        except Exception:
+            pass
+
 
 class ReconTUI(App):
-    """Recon Orchestrator - Main TUI Application"""
-
     CSS = """
-    Screen {
-        background: #0d1117;
-        color: #c9d1d9;
-    }
-    Header {
-        background: #161b22;
-        color: #58a6ff;
-    }
-    Footer {
-        background: #161b22;
-        color: #8b949e;
-    }
-    TabbedContent {
-        background: #0d1117;
-        border: solid #30363d;
-    }
-    TabPane {
-        padding: 1 2;
-        background: #0d1117;
-    }
-    .phase-title {
-        color: #58a6ff;
-        text-style: bold;
-        margin-bottom: 1;
-    }
-    .phase-desc {
-        color: #8b949e;
-        margin-bottom: 1;
-    }
-    .controls {
-        height: auto;
-        margin: 1 0;
-    }
-    Button {
-        background: #238636;
-        color: white;
-        margin-right: 1;
-    }
-    Button:hover {
-        background: #2ea043;
-    }
-    Button:disabled {
-        background: #30363d;
-        color: #6e7681;
-    }
-    Input {
-        background: #0d1117;
-        border: solid #30363d;
-        color: #c9d1d9;
-        margin-right: 1;
-    }
-    Input:focus {
-        border: solid #58a6ff;
-    }
-    .status {
-        height: 1;
-        margin: 1 0;
-        color: #8b949e;
-    }
-    RichLog {
-        background: #000000;
-        border: solid #30363d;
-        height: 1fr;
-        min-height: 8;
-    }
-    DataTable {
-        background: #161b22;
-        border: solid #30363d;
-    }
-    LoadingIndicator {
-        color: #58a6ff;
-    }
+    Screen { background: #0d1117; color: #c9d1d9; }
+    Header { background: #161b22; color: #58a6ff; text-style: bold; }
+    Footer { background: #161b22; color: #8b949e; }
+    TabbedContent { background: #0d1117; border: round #30363d; height: 1fr; }
+    Tab { background: #161b22; color: #8b949e; text-style: bold; }
+    Tab.-active { background: #0d1117; color: #58a6ff; text-style: bold underline; }
+    Tab:hover { background: #21262d; }
+    TabPane { background: #0d1117; padding: 1 2; height: 1fr; overflow-y: auto; }
+    .card { background: #161b22; border: round #58a6ff; padding: 1 2; margin: 0 0 1 0; height: auto; }
+    .card-title { color: #58a6ff; text-style: bold; height: 1; }
+    .card-subtitle { color: #79c0ff; text-style: italic; height: 1; }
+    .card-desc { color: #c9d1d9; margin-top: 1; }
+    .controls { height: 3; margin: 1 0; align: left middle; }
+    .run-btn { background: #238636; color: #ffffff; text-style: bold; min-width: 22; margin-right: 1; }
+    .run-btn:hover { background: #2ea043; }
+    .run-btn:focus { background: #2ea043; }
+    .clear-btn { background: #21262d; color: #c9d1d9; min-width: 10; }
+    .clear-btn:hover { background: #30363d; }
+    .target-input { background: #0d1117; color: #c9d1d9; border: tall #30363d; margin-right: 1; width: 32; }
+    .target-input:focus { border: tall #58a6ff; }
+    .status { height: 1; padding: 0 1; text-style: bold; margin: 0 0 1 0; }
+    .status.ready { color: #8b949e; background: #161b22; }
+    .status.running { color: #d29922; background: #2d2000; }
+    .status.ok { color: #3fb950; background: #0d2818; }
+    .status.err { color: #f85149; background: #2d0f0f; }
+    ProgressBar { height: 1; margin: 0 0 1 0; display: none; }
+    ProgressBar > .bar--bar { color: #58a6ff; background: #161b22; }
+    .log-box { background: #000000; border: round #21262d; height: 14; margin: 1 0; }
+    .phase-log { background: #000000; color: #7ee787; padding: 1; }
+    .results { height: auto; min-height: 5; margin: 1 0; }
+    DataTable { background: #161b22; border: round #30363d; height: auto; max-height: 22; }
+    DataTable > .datatable--header { background: #0d1117; color: #79c0ff; text-style: bold; }
+    .result-panel { background: #161b22; border: round #3fb950; padding: 1 2; height: auto; }
     """
 
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("ctrl+r", "reset_state", "Reset"),
-        ("ctrl+h", "help", "Help"),
+        ("q", "quit", "خروج"),
+        ("ctrl+r", "reset", "إعادة"),
+        ("ctrl+h", "help", "مساعدة"),
     ]
 
     def __init__(self):
         super().__init__()
-        self.app_state = {
-            "platform": os.environ.get("RECON_ENV", "kali"),
-            "target": None,
-            "devices": [],
-            "scan_result": None,
-            "vulns": None,
-            "network_type": None,
-            "session": None,
-        }
+        self.app_state = {"platform": os.environ.get("RECON_ENV", "kali"), "target": None}
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         phases = get_phases()
-        with TabbedContent(initial="tab-network"):
+        with TabbedContent(id="main-tabs"):
             for spec in phases:
-                with TabPane(f"{spec.number}. {spec.arabic}", id=f"tab-{spec.key}"):
+                with TabPane(f"{spec.icon}  {spec.number}. {spec.arabic}", id=f"tab-{spec.key}"):
                     yield PhaseTab(spec, self.app_state)
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = "Recon Orchestrator — Kali Edition"
-        self.sub_title = f"Platform: {self.app_state['platform']} | Session ready"
+        self.sub_title = f"المنصة: {self.app_state['platform']}  |  جاهز"
 
-    # ---------- Event Handlers ----------
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        btn_id = event.button.id or ""
-        if not btn_id.startswith("btn-"):
-            return
-        phase_key = btn_id[4:]  # strip "btn-"
-        tab = self._find_tab(phase_key)
-        if not tab:
-            return
-
-        # Run phase in worker
-        self._run_phase(phase_key, tab)
-
-    async def action_reset_state(self) -> None:
+    def action_reset(self) -> None:
         self.app_state["target"] = None
-        self.app_state["devices"] = []
-        self.app_state["scan_result"] = None
-        self.app_state["vulns"] = None
-        self.notify("State reset", severity="information")
+        self.notify("تمت إعادة التعيين", severity="information")
 
     def action_help(self) -> None:
         self.notify(
-            "Shortcuts: Ctrl+R=Reset | Q=Quit | Click 'Run' to execute",
-            title="Help", severity="information", timeout=8
+            "Q=خروج  |  Ctrl+R=إعادة  |  Ctrl+H=مساعدة  |  انقر تشغيل المرحلة",
+            title="مساعدة", timeout=8,
         )
-
-    # ---------- Worker: Run Phase ----------
-
-    @work(exclusive=True)
-    async def _run_phase(self, phase_key: str, tab: PhaseTab) -> None:
-        spec = tab.spec
-        btn = tab.query_one(f"#btn-{spec.key}", Button)
-        btn.disabled = True
-        tab.set_status(f"⏳ Running {spec.english}...", "info")
-        tab.log(f"[cyan]▶ Starting {spec.english}[/cyan]")
-
-        try:
-            input_val = tab.get_input_value()
-            kwargs = {"target": input_val} if input_val else {}
-
-            # Run in thread to avoid blocking event loop
-            result = await asyncio.to_thread(spec.runner, self.app_state, **kwargs)
-
-            ok = result.get("ok", False)
-            output = result.get("output", "")
-
-            if output:
-                tab.log(output)
-
-            if ok:
-                tab.set_status(f"✓ {spec.english} completed", "ok")
-                tab.log(f"[green]✓ Success[/green]")
-                self._render_result(tab, spec, result.get("result"))
-            else:
-                tab.set_status(f"✗ {spec.english} failed", "err")
-                tab.log(f"[red]✗ Failed[/red]")
-
-        except Exception as e:
-            tab.set_status(f"✗ Error: {e}", "err")
-            tab.log(f"[red]✗ Exception: {type(e).__name__}: {e}[/red]")
-        finally:
-            btn.disabled = False
-
-    def _render_result(self, tab: PhaseTab, spec, result) -> None:
-        """Render structured result based on phase type."""
-        try:
-            if spec.key == "discovery" and result:
-                table = DataTable()
-                table.add_columns("IP", "MAC", "Vendor", "Type")
-                for d in result:
-                    table.add_row(
-                        str(getattr(d, "ip", "?")),
-                        str(getattr(d, "mac", "-")),
-                        str(getattr(d, "vendor", "-"))[:20],
-                        str(getattr(d, "device_type", "-")),
-                    )
-                tab.log("[bold cyan]📋 Discovered Devices:[/bold cyan]")
-                tab.mount(table)
-            elif spec.key == "ports" and result:
-                ports = getattr(result, "ports", [])
-                if ports:
-                    table = DataTable()
-                    table.add_columns("Port", "Proto", "Service", "Version", "Risk")
-                    for p in ports:
-                        table.add_row(
-                            str(getattr(p, "port", "?")),
-                            str(getattr(p, "protocol", "?")),
-                            str(getattr(p, "service", "?")),
-                            str(getattr(p, "product", "")) + " " + str(getattr(p, "version", "")),
-                            str(getattr(p, "risk", "?")),
-                        )
-                    tab.log("[bold cyan]📋 Open Ports:[/bold cyan]")
-                    tab.mount(table)
-            elif spec.key == "vulns" and result:
-                table = DataTable()
-                table.add_columns("CVE", "Severity", "CVSS", "Port")
-                for v in result:
-                    table.add_row(
-                        str(getattr(v, "cve", "?")),
-                        str(getattr(v, "severity", "?")),
-                        str(getattr(v, "cvss", "?")),
-                        str(getattr(v, "port", "?")),
-                    )
-                tab.log("[bold cyan]📋 Vulnerabilities:[/bold cyan]")
-                tab.mount(table)
-        except Exception as e:
-            tab.log(f"[yellow]Render note: {e}[/yellow]")
-
-    def _find_tab(self, phase_key: str):
-        try:
-            tabs = self.query_all(PhaseTab)
-            for t in tabs:
-                if t.spec.key == phase_key:
-                    return t
-        except Exception:
-            pass
-        return None
 
 
 def main():
-    # Ensure env
     os.environ.setdefault("RECON_ENV", "kali")
     os.environ.setdefault("RECON_CONFIG_DIR", "kali/config")
     os.environ.setdefault("RECON_PLUGINS_DIR", "kali/plugins")
-
-    # Load hooks for extended info
     try:
         from kali.hooks import install_network_hook
         install_network_hook()
     except Exception:
         pass
-
-    app = ReconTUI()
-    app.run()
+    ReconTUI().run()
 
 
 if __name__ == "__main__":
