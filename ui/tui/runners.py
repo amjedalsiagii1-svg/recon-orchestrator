@@ -1,11 +1,15 @@
+import contextlib
+import io
 """Phase Runners - Handles async functions correctly"""
 import asyncio
 import inspect
 
 
 def _call_phase(fn, *args, **kwargs):
-    """Call function; if async, run it via asyncio.run()."""
-    result = fn(*args, **kwargs)
+    """Call function; if async, run it via asyncio.run(). Capture stdout to avoid breaking TUI."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        result = fn(*args, **kwargs)
     if inspect.iscoroutine(result):
         # Need to run the coroutine
         try:
