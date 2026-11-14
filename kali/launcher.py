@@ -81,7 +81,7 @@ def _install_playbook_hook():
     try:
         import rich.console as rc
         _orig = rc.Console.print
-        state = {"ports": [], "target": None, "shown": False}
+        state = {"ports": [], "target": None, "shown": False, "report_done": False}
 
         def _extract_ports(txt):
             ports = []
@@ -121,6 +121,19 @@ def _install_playbook_hook():
                                 display_playbook(pb, target)
                         except Exception:
                             pass
+                    
+                    # Enrich HTML report when it's generated
+                    if ("Report Ready" in txt or "\u0627\u0644\u062a\u0642\u0631\u064a\u0631 \u062c\u0627\u0647\u0632" in txt) and state["ports"] and not state["report_done"]:
+                        import re as _re
+                        path_match = _re.search(r'(reports/output/[\w\-\.]+\.html)', txt)
+                        if path_match:
+                            state["report_done"] = True
+                            try:
+                                from kali.report_enricher import enrich_report_file
+                                target = state["target"] or "<target>"
+                                enrich_report_file(path_match.group(1), state["ports"], target)
+                            except Exception:
+                                pass
             except Exception:
                 pass
 
