@@ -1,0 +1,24 @@
+service: nfs
+port: 2049
+arabic_name: "NFS (مشاركة ملفات Linux)"
+description: "مشاركة ملفات Unix - كثيراً ما تكون مفتوحة"
+commands:
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "showmount -e {target}"
+        desc: "قائمة المشاركات"
+        output: "/export/data * - كل المشاركات"
+        when: "أول أمر - سريع"
+      - cmd: "nmap -p111,2049 --script nfs-ls,nfs-showmount,nfs-statfs {target}"
+        desc: "فحص NSE شامل"
+        output: "المشاركات + الملفات + الصلاحيات"
+        when: "بعد showmount"
+  mount:
+    arabic: "تحميل المشاركة"
+    items:
+      - cmd: "mkdir -p /mnt/nfs_target && sudo mount -t nfs {target}:/export /mnt/nfs_target"
+        desc: "تحميل المشاركة"
+        output: "المشاركة متاحة في /mnt/nfs_target"
+        when: "بعد اكتشاف مشاركة"
+        warning: "فقط على شبكتك المصرح بها"

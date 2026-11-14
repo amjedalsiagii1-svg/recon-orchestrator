@@ -1,0 +1,36 @@
+service: redis
+port: 6379
+arabic_name: "Redis (قاعدة بيانات في الذاكرة)"
+description: "قاعدة بيانات NoSQL سريعة - كثيراً ما تكون بدون كلمة مرور"
+commands:
+  connect:
+    arabic: "الاتصال"
+    desc: "اختبار الوصول المباشر"
+    items:
+      - cmd: "redis-cli -h {target}"
+        desc: "اتصال مباشر بـ redis"
+        output: "127.0.0.1:6379> - prompt إذا نجح"
+        when: "أول أمر - إذا نجح، فأنت مخترق"
+      - cmd: "nc -v {target} 6379"
+        desc: "فحص بسيط منخفض المستوى"
+        output: "رد بـ +OK أو -ERR"
+        when: "عندما لا يتوفر redis-cli"
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p6379 --script redis-info {target}"
+        desc: "فحص آلي لـ Redis"
+        output: "الإصدار + التكوين + info"
+        when: "لتحديد الإصدار بسرعة"
+  vulnerabilities:
+    arabic: "استغلال"
+    items:
+      - cmd: "redis-cli -h {target} INFO"
+        desc: "قراءة معلومات النظام"
+        output: "redis_version, os, memory"
+        when: "بعد الاتصال الناجح"
+        warning: "قد يكشف بيانات حساسة"
+      - cmd: "redis-cli -h {target} CONFIG GET dir"
+        desc: "الحصول على مجلد العمل"
+        output: "/var/lib/redis - مسار الكتابة"
+        when: "لاختبار كتابة ملفات"

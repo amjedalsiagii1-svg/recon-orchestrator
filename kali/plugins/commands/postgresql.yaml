@@ -1,0 +1,26 @@
+service: postgresql
+port: 5432
+arabic_name: "PostgreSQL (قاعدة بيانات)"
+description: "قاعدة بيانات علائقية قوية"
+commands:
+  connect:
+    arabic: "الاتصال"
+    items:
+      - cmd: "psql -h {target} -U postgres"
+        desc: "اتصال كـ postgres"
+        output: "postgres=# - prompt"
+        when: "بعد تخمين كلمة المرور"
+  brute_force:
+    arabic: "تخمين"
+    items:
+      - cmd: "hydra -L users.txt -P pass.txt postgres://{target}"
+        desc: "هجوم قاموس"
+        output: "valid credentials"
+        when: "للمصادقة الافتراضية"
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p5432 --script pgsql-brute,pgsql-databases {target}"
+        desc: "فحص آلي شامل"
+        output: "النسخ + قواعد البيانات + users"
+        when: "أول فحص"

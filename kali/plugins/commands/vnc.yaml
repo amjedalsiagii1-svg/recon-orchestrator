@@ -1,0 +1,26 @@
+service: vnc
+port: 5900
+arabic_name: "VNC (سطح مكتب بعيد)"
+description: "سطح مكتب بعيد - كثيراً ما يكون بكلمة مرور فارغة"
+commands:
+  connect:
+    arabic: "الاتصال"
+    items:
+      - cmd: "vncviewer {target}:5900"
+        desc: "اتصال مباشر"
+        output: "نافذة سطح المكتب"
+        when: "بعد اختبار كلمة المرور"
+  auth_test:
+    arabic: "اختبار المصادقة"
+    items:
+      - cmd: "nmap -p5900 --script vnc-info,vnc-brute {target}"
+        desc: "فحص VNC تلقائي"
+        output: "الإصدار + المصادقة"
+        when: "أول أمر - قد يكشف كلمة المرور"
+  vulnerabilities:
+    arabic: "ثغرات"
+    items:
+      - cmd: "searchsploit vnc"
+        desc: "بحث في قاعدة exploits"
+        output: "POCs للثغرات"
+        when: "بعد تحديد الإصدار"

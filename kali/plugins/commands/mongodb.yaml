@@ -1,0 +1,27 @@
+service: mongodb
+port: 27017
+arabic_name: "MongoDB (قاعدة بيانات NoSQL)"
+description: "قاعدة بيانات NoSQL - كثيراً ما تكون بدون مصادقة"
+commands:
+  connect:
+    arabic: "الاتصال"
+    items:
+      - cmd: "mongo {target}:27017"
+        desc: "اتصال مباشر"
+        output: "> - prompt إذا نجح"
+        when: "أول محاولة"
+      - cmd: "mongosh {target}:27017"
+        desc: "العميل الحديث"
+        output: "test> - prompt"
+        when: "إذا كان mongosh مثبتاً"
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p27017 --script mongodb-info,mongodb-databases {target}"
+        desc: "فحص NSE"
+        output: "قواعد البيانات + الإصدار + المستخدمين"
+        when: "قبل الاتصال اليدوي"
+      - cmd: "nmap -p27017 --script mongodb-brute {target}"
+        desc: "تخمين كلمة المرور"
+        output: "valid credentials if found"
+        when: "عندما لا يعمل الاتصال المجهول"

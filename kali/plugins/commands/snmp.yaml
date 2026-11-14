@@ -1,0 +1,23 @@
+service: snmp
+port: 161
+arabic_name: "SNMP (مراقبة الشبكة)"
+description: "بروتوكول إدارة شبكة - كثيراً ما يستخدم community strings افتراضية"
+commands:
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "snmpwalk -v2c -c public {target}"
+        desc: "قراءة SNMP بـ community default"
+        output: "شجرة كاملة من OIDs"
+        when: "أول أمر - 80% من الأجهزة تستخدم public"
+      - cmd: "snmp-check {target} -c public"
+        desc: "أداة شاملة"
+        output: "نظام، عمليات، شبكة، مستخدمين"
+        when: "أسرع من snmpwalk"
+  bruteforce:
+    arabic: "تخمين community"
+    items:
+      - cmd: "onesixtyone -c /usr/share/seclists/Discovery/SNMP/common-snmp-community-strings.txt {target}"
+        desc: "تخمين community strings"
+        output: "valid community strings"
+        when: "عندما لا يعمل public"

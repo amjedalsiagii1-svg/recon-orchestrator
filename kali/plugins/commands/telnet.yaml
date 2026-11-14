@@ -1,0 +1,23 @@
+service: telnet
+port: 23
+arabic_name: "Telnet (اتصال قديم)"
+description: "خدمة قديمة غير مشفرة - خطيرة جداً"
+commands:
+  connect:
+    arabic: "الاتصال"
+    items:
+      - cmd: "telnet {target}"
+        desc: "اتصال مباشر"
+        output: "login: - prompt"
+        when: "أول محاولة"
+      - cmd: "nc -v {target} 23"
+        desc: "اتصال عبر netcat"
+        output: "banner + prompt"
+        when: "عندما لا يعمل telnet"
+  brute_force:
+    arabic: "تخمين"
+    items:
+      - cmd: "hydra -L users.txt -P pass.txt telnet://{target}"
+        desc: "هجوم قاموس"
+        output: "valid credentials"
+        when: "لأجهزة إنترنت الأشياء (IoT)"

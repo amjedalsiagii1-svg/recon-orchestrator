@@ -1,0 +1,24 @@
+service: ldap
+port: 389
+arabic_name: "LDAP (خدمة دليل)"
+description: "خدمة دليل Active Directory - هدف ذهبي"
+commands:
+  enum:
+    arabic: "استطلاع"
+    items:
+      - cmd: "ldapsearch -x -h {target} -s base namingcontexts"
+        desc: "قراءة الـ base DN"
+        output: "namingContexts: DC=example,DC=com"
+        when: "أول أمر - يحدد البنية"
+      - cmd: "nmap -p389,636 --script ldap-rootdse,ldap-search {target}"
+        desc: "فحص آلي"
+        output: "RootDSE + schema"
+        when: "بديل سريع"
+  active_directory:
+    arabic: "Active Directory"
+    items:
+      - cmd: "ldapsearch -x -h {target} -b 'DC=example,DC=com'"
+        desc: "قراءة كل المستخدمين"
+        output: "قائمة المستخدمين"
+        when: "إذا كان الـ base DN معروفاً"
+        warning: "قد يكون هناك مئات النتائج"
