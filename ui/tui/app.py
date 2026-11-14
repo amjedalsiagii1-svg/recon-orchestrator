@@ -1,6 +1,9 @@
-"""TUI v5 - Direct runner calls (no subprocess)"""
+"""TUI v6 - Bulletproof app with error capture and size check"""
 import asyncio
 import os
+import sys
+import shutil
+import traceback
 from datetime import datetime
 from textual import work
 from textual.app import App, ComposeResult
@@ -15,7 +18,6 @@ from ui.tui.runners import (
     run_p1, run_p2, run_p3, run_p4, run_p5, run_p6, run_p7, run_p8,
 )
 
-# Direct runner map (no subprocess!)
 RUNNERS = {
     "network": run_p1, "discovery": run_p2, "target": run_p3,
     "ports": run_p4, "vulns": run_p5, "exploit": run_p6,
@@ -68,39 +70,28 @@ class PhaseTab(Container):
 
     def _start(self):
         if self._running:
-            self._log("[yellow]⚠ قيد التشغيل مسبقاً[/yellow]")
             return
         self._running = True
-        _dlog(f"_start {self.spec.key}")
         self._run_phase_async()
 
     @work(exclusive=True)
     async def _run_phase_async(self):
-        _dlog(f"_run_phase_async START {self.spec.key}")
+        _dlog(f"START phase {self.spec.key}")
         try:
             self._status("⏳ جاري التشغيل...", "running")
-            self._progress(True)
             self._log("[bold cyan]━━━ بدء التشغيل ━━━[/bold cyan]")
-            self._log(f"[dim]⏱ {datetime.now().strftime('%H:%M:%S')}[/dim]")
 
             target = self._get_input()
-            if target:
-                self._log(f"Target: {target}")
-            else:
-                self._log("Target: (from state)")
-
-            # Direct call (no subprocess)
             runner = RUNNERS.get(self.spec.key)
             if not runner:
-                self._log(f"[red]❌ لا يوجد runner لـ {self.spec.key}[/red]")
-                self._status("✗ runner غير موجود", "err")
+                self._log(f"[red]No runner for {self.spec.key}[/red]")
+                self._status("✗ runner مفقود", "err")
                 return
 
-            self._log("[yellow]⏳ جاري التنفيذ (async in thread)...[/yellow]")
-
-            # Run in thread to avoid blocking event loop
+            self._log("[yellow]⏳ جاري التنفيذ...[/yellow]")
+            
+            # Direct call via thread
             result = await asyncio.to_thread(runner, self.app_state, target=target)
-
             _dlog(f"Runner returned ok={result.get('ok')}")
 
             output = result.get("output", "") or ""
@@ -109,77 +100,60 @@ class PhaseTab(Container):
                     self._log(line)
 
             if result.get("ok"):
-                self._status("✓ اكتملت بنجاح", "ok")
-                self._log("[bold green]✓ المرحلة اكتملت[/bold green]")
+                self._status("✓ اكتملت", "ok")
+                self._log("[bold green]✓ اكتملت[/bold green]")
                 self._render_result(result.get("result"))
             else:
                 self._status("✗ فشلت", "err")
-                self._log("[bold red]✗ المرحلة فشلت[/bold red]")
+                self._log("[bold red]✗ فشلت[/bold red]")
         except Exception as e:
-            import traceback
             _dlog(f"EXCEPTION: {traceback.format_exc()}")
             self._status("✗ خطأ", "err")
             self._log(f"[red]{traceback.format_exc()}[/red]")
         finally:
             self._running = False
-            self._progress(False)
-            _dlog(f"_run_phase_async DONE {self.spec.key}")
 
     def _render_result(self, data):
-        if not data:
-            return
+        if not data: return
         try:
             container = self.app.query_one(f"#results-{self.spec.key}", Container)
-            for w in list(container.children):
-                w.remove()
-
+            for w in list(container.children): w.remove()
+            
             if self.spec.key == "network" and isinstance(data, dict):
-                ntype = data.get("network_type") or data.get("classification") or "unknown"
-                try:
-                    conf = float(data.get("confidence", 0)) * 100
-                except (ValueError, TypeError):
-                    conf = 0
+                ntype = data.get("network_type", "unknown")
+                try: conf = float(data.get("confidence", 0)) * 100
+                except: conf = 0
                 container.mount(Static(
-                    f"[bold cyan]النوع:[/bold cyan]  {ntype}\n"
-                    f"[bold cyan]الثقة:[/bold cyan]  {conf:.0f}%",
+                    f"[bold cyan]النوع:[/bold cyan] {ntype}\n[bold cyan]الثقة:[/bold cyan] {conf:.0f}%",
                     classes="result-panel"))
             elif self.spec.key == "discovery" and isinstance(data, list):
-                table = DataTable()
-                table.add_columns("IP", "MAC", "المصنّع", "النوع")
+                t = DataTable(); t.add_columns("IP", "MAC", "المصنّع", "النوع")
                 for d in data:
-                    table.add_row(str(d.get("ip", "?")), str(d.get("mac", "-"))[:17],
-                                  str(d.get("vendor", "-"))[:28],
-                                  str(d.get("device_type", "?")))
-                container.mount(table)
+                    t.add_row(str(d.get("ip","?")), str(d.get("mac","-"))[:17],
+                              str(d.get("vendor","-"))[:28], str(d.get("device_type","?")))
+                container.mount(t)
             elif self.spec.key == "ports" and isinstance(data, dict):
                 ports = data.get("ports", [])
                 if ports:
-                    table = DataTable()
-                    table.add_columns("المنفذ", "البروتوكول", "الخدمة", "الإصدار", "الخطورة")
+                    t = DataTable(); t.add_columns("المنفذ","البروتوكول","الخدمة","الإصدار","الخطورة")
                     for p in ports:
-                        ver = f"{p.get('product', '')} {p.get('version', '')}".strip()
-                        table.add_row(str(p.get("port", "?")),
-                                      str(p.get("protocol", p.get("proto", "?"))),
-                                      str(p.get("service", "?")), ver[:30] or "-",
-                                      str(p.get("risk", "?")))
-                    container.mount(table)
+                        ver = f"{p.get('product','')} {p.get('version','')}".strip()
+                        t.add_row(str(p.get("port","?")), str(p.get("protocol",p.get("proto","?"))),
+                                  str(p.get("service","?")), ver[:30] or "-", str(p.get("risk","?")))
+                    container.mount(t)
             elif self.spec.key == "vulns" and isinstance(data, list):
-                table = DataTable()
-                table.add_columns("CVE", "الخطورة", "CVSS", "المنفذ")
+                t = DataTable(); t.add_columns("CVE","الخطورة","CVSS","المنفذ")
                 for v in data:
-                    table.add_row(str(v.get("cve", "?")), str(v.get("severity", "?")),
-                                  str(v.get("cvss", "?")), str(v.get("port", "?")))
-                container.mount(table)
+                    t.add_row(str(v.get("cve","?")), str(v.get("severity","?")),
+                              str(v.get("cvss","?")), str(v.get("port","?")))
+                container.mount(t)
         except Exception as e:
-            _dlog(f"render_result error: {e}")
+            _dlog(f"render_result: {e}")
 
     def _get_input(self):
-        if not self.spec.has_input:
-            return ""
-        try:
-            return self.app.query_one(f"#input-{self.spec.key}", Input).value.strip()
-        except Exception:
-            return ""
+        if not self.spec.has_input: return ""
+        try: return self.app.query_one(f"#input-{self.spec.key}", Input).value.strip()
+        except: return ""
 
     def _status(self, msg, kind):
         try:
@@ -187,35 +161,25 @@ class PhaseTab(Container):
             s.update(msg)
             s.remove_class("ready", "running", "ok", "err")
             s.add_class(kind)
-        except Exception:
-            pass
+        except: pass
 
     def _log(self, text):
-        try:
-            self.app.query_one(f"#log-{self.spec.key}", RichLog).write(text)
-        except Exception:
-            pass
+        try: self.app.query_one(f"#log-{self.spec.key}", RichLog).write(text)
+        except: pass
 
     def _progress(self, on):
         try:
             pb = self.app.query_one(f"#progress-{self.spec.key}", ProgressBar)
             pb.display = on
-            if on:
-                pb.advance(30)
-            else:
-                pb.update(progress=0)
-        except Exception:
-            pass
+        except: pass
 
     def _clear(self):
         try:
             self.app.query_one(f"#log-{self.spec.key}", RichLog).clear()
             c = self.app.query_one(f"#results-{self.spec.key}", Container)
-            for w in list(c.children):
-                w.remove()
+            for w in list(c.children): w.remove()
             self._status("● جاهز", "ready")
-        except Exception:
-            pass
+        except: pass
 
 
 class ReconTUI(App):
@@ -254,21 +218,18 @@ class ReconTUI(App):
     def __init__(self):
         super().__init__()
         self.app_state = {"platform": os.environ.get("RECON_ENV", "kali"), "target": None}
-        _dlog("ReconTUI __init__")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        phases = get_phases()
         with TabbedContent(id="main-tabs"):
-            for spec in phases:
+            for spec in get_phases():
                 with TabPane(f"{spec.icon}  {spec.number}. {spec.arabic}", id=f"tab-{spec.key}"):
                     yield PhaseTab(spec, self.app_state)
         yield Footer()
 
     def on_mount(self):
         self.title = "Recon Orchestrator — Kali Edition"
-        self.sub_title = f"المنصة: {self.app_state['platform']}"
-        _dlog("TUI mounted")
+        _dlog("TUI mounted successfully")
 
     def action_reset(self):
         self.app_state["target"] = None
@@ -279,16 +240,47 @@ class ReconTUI(App):
 
 
 def main():
+    # 1. Terminal Size Check (Textual crashes if too small)
+    size = shutil.get_terminal_size()
+    _dlog(f"Terminal size: {size.columns}x{size.lines}")
+    
+    if size.lines < 20 or size.columns < 60:
+        print("=" * 60)
+        print("❌ خطأ: نافذة الطرفية صغيرة جداً")
+        print(f"   الحجم الحالي: {size.columns} عرض × {size.lines} طول")
+        print("   المطلوب: 60+ عرض × 20+ طول")
+        print("\nالحل: قم بتكبير نافذة الطرفية (Maximize) ثم أعد المحاولة.")
+        print("=" * 60)
+        sys.exit(1)
+
     os.environ.setdefault("RECON_ENV", "kali")
     os.environ.setdefault("RECON_CONFIG_DIR", "kali/config")
     os.environ.setdefault("RECON_PLUGINS_DIR", "kali/plugins")
+
+    _dlog("=" * 50)
+    _dlog("TUI Main starting...")
+    _dlog(f"Python: {sys.executable}")
+    _dlog(f"TTY: {sys.stdout.isatty()}")
+    _dlog(f"TERM: {os.environ.get('TERM')}")
+
     try:
         from kali.hooks import install_network_hook
         install_network_hook()
-    except Exception:
-        pass
-    ReconTUI().run()
+    except Exception as e:
+        _dlog(f"Hooks failed: {e}")
 
+    try:
+        app = ReconTUI()
+        app.run()
+    except Exception as e:
+        tb = traceback.format_exc()
+        _dlog(f"FATAL CRASH: {tb}")
+        print("\n" + "=" * 60)
+        print("❌ انهارت الواجهة:")
+        print(f"{e}")
+        print("=" * 60)
+        print("التفاصيل في: /tmp/tui_debug.log")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
