@@ -26,9 +26,18 @@ def run_p1(state, **kw):
     from phases.p1_network_type import detect
     try:
         r = _call_phase(detect)
-        ntype = str(getattr(r, "network_type", None) or getattr(r, "classification", "unknown"))
+        # Handle Phase1Result -> classification object
+        classification = getattr(r, "classification", None)
+        if classification is not None:
+            ntype = str(getattr(classification, "type", "unknown"))
+            conf = float(getattr(classification, "confidence", 0))
+        else:
+            ntype = str(getattr(r, "network_type", "unknown"))
+            conf = float(getattr(r, "confidence", 0))
         state["network_type"] = ntype
-        return {"ok": True, "result": r, "output": f"Type: {ntype}"}
+        return {"ok": True,
+                "result": {"network_type": ntype, "confidence": conf},
+                "output": f"Type: {ntype} (confidence: {conf:.2f})"}
     except Exception as e:
         import traceback
         traceback.print_exc()
