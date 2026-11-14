@@ -1,7 +1,7 @@
 """Web Scan Suggestion Hook"""
 import re
-from rich.console import Console
 from rich.panel import Panel
+from ._utils import render_arg_to_text
 
 
 def install_webscan_hook():
@@ -26,7 +26,7 @@ def install_webscan_hook():
         _orig(self, *args, **kwargs)
         try:
             for arg in args:
-                txt = str(arg)
+                txt = render_arg_to_text(_orig, self, arg)
                 if not txt:
                     continue
                 t = _extract_target(txt)

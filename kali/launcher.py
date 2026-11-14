@@ -19,14 +19,14 @@ from kali.hooks import (
 
 _hooks = []
 
-if install_phase8_hook():
-    _hooks.append("phase8-web")
+if install_network_hook():
+    _hooks.append("extended-info")
 if install_webscan_hook():
     _hooks.append("webscan-suggest")
 if install_playbook_hook():
-    _hooks.append("playbook")
-if install_network_hook():
-    _hooks.append("extended-info")
+    _hooks.append("playbook+enricher")
+if install_phase8_hook():
+    _hooks.append("phase8-web")
 
 if _hooks:
     print(f"\033[92m[OK] Kali Edition hooks: {', '.join(_hooks)}\033[0m")

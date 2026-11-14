@@ -1,12 +1,12 @@
-"""Playbook Hook - Shows command plan after port scan"""
+"""Playbook + Report Enricher Hook"""
 import re
-from rich.console import Console
+from ._utils import render_arg_to_text
 
 
 def install_playbook_hook():
     import rich.console as rc
     _orig = rc.Console.print
-    state = {"ports": [], "target": None, "shown": False}
+    state = {"ports": [], "target": None, "shown": False, "report_done": False}
 
     def _extract_ports(txt):
         ports = set()
@@ -25,7 +25,7 @@ def install_playbook_hook():
         _orig(self, *args, **kwargs)
         try:
             for arg in args:
-                txt = str(arg)
+                txt = render_arg_to_text(_orig, self, arg)
                 if not txt:
                     continue
                 t = _extract_target(txt)
@@ -48,6 +48,17 @@ def install_playbook_hook():
                                 display_playbook(pb, target)
                         except Exception:
                             pass
+                if "Report Ready" in txt or "التقرير جاهز" in txt:
+                    if not state["report_done"]:
+                        pm = re.search(r'(reports/output/[\w\-\.]+\.html)', txt)
+                        if pm:
+                            state["report_done"] = True
+                            try:
+                                from kali.report_enricher import enrich_report_file
+                                target = state["target"] or "<target>"
+                                enrich_report_file(pm.group(1), state["ports"], target)
+                            except Exception:
+                                pass
         except Exception:
             pass
 

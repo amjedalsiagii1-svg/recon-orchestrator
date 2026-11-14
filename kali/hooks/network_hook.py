@@ -3,6 +3,7 @@ import os
 import re
 from rich.console import Console
 from rich.panel import Panel
+from ._utils import render_arg_to_text
 
 
 def show_extended_panel(network_type):
@@ -42,7 +43,7 @@ def install_network_hook():
         _orig(self, *args, **kwargs)
         try:
             for arg in args:
-                txt = str(arg)
+                txt = render_arg_to_text(_orig, self, arg)
                 m = re.search(r'(?:Type|النوع):\s*([a-z_]+)', txt)
                 if m:
                     ntype = m.group(1)
