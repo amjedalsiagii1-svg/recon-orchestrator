@@ -63,10 +63,10 @@ class PhaseTab(Container):
             self._log("[yellow]⚠ المرحلة قيد التشغيل[/yellow]")
             return
         self._running = True
-        self._work()
+        self._run_phase_async()
 
     @work(exclusive=True)
-    async def _work(self):
+    async def _run_phase_async(self):
         try:
             self._status(f"⏳ جاري التشغيل...", "running")
             self._progress(True)
@@ -88,7 +88,7 @@ class PhaseTab(Container):
             if result.get("ok"):
                 self._status(f"✓  اكتملت بنجاح", "ok")
                 self._log("[bold green]✓  المرحلة اكتملت[/bold green]")
-                self._render(result.get("result"))
+                self._render_result(result.get("result"))
             else:
                 self._status(f"✗  فشلت", "err")
                 self._log("[bold red]✗  المرحلة فشلت[/bold red]")
@@ -99,7 +99,7 @@ class PhaseTab(Container):
             self._running = False
             self._progress(False)
 
-    def _render(self, data):
+    def _render_result(self, data):
         if not data:
             return
         try:
