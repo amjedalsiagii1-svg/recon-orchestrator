@@ -1,4 +1,4 @@
-"""Recon Orchestrator - Modern TUI v2"""
+"""Recon Orchestrator - Modern TUI v3"""
 import asyncio
 import os
 from textual import work
@@ -46,9 +46,11 @@ class PhaseTab(Container):
             )
         yield Static("● جاهز", id=f"status-{self.spec.key}", classes="status ready")
         yield ProgressBar(id=f"progress-{self.spec.key}", show_eta=False)
-        with ScrollableContainer(classes="log-box"):
-            yield RichLog(id=f"log-{self.spec.key}", highlight=True, markup=True, wrap=True,
-                          classes="phase-log")
+        yield ScrollableContainer(
+            RichLog(id=f"log-{self.spec.key}", highlight=True, markup=True, wrap=True,
+                    classes="phase-log"),
+            classes="log-box",
+        )
         yield Container(id=f"results-{self.spec.key}", classes="results")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -60,7 +62,7 @@ class PhaseTab(Container):
 
     def _start(self):
         if self._running:
-            self._log("[yellow]⚠ المرحلة قيد التشغيل[/yellow]")
+            self._log("[yellow]⚠ المرحلة قيد التشغيل مسبقاً[/yellow]")
             return
         self._running = True
         self._run_phase_async()
@@ -72,29 +74,36 @@ class PhaseTab(Container):
             self._progress(True)
             self._log(f"[bold cyan]{'━'*55}[/bold cyan]")
             self._log(f"[bold cyan]▶  {self.spec.arabic} / {self.spec.english}[/bold cyan]")
+            self._log(f"[dim]⏱  {__import__('datetime').datetime.now().strftime('%H:%M:%S')}[/dim]")
 
             target = self._get_input()
+            self._log(f"[dim]Target: {target or '(none)'}[/dim]")
+            self._log("[yellow]⏳ Running subprocess...[/yellow]")
+
             result = await asyncio.to_thread(
                 run_phase_isolated, self.spec.key, target
             )
 
-            output = result.get("output", "")
-            if output:
-                for line in output.splitlines():
-                    if "__JSON_" in line:
-                        continue
+            self._log("[yellow]--- subprocess finished ---[/yellow]")
+
+            output = result.get("output", "") or ""
+            for line in output.splitlines():
+                if "__JSON_" in line:
+                    continue
+                if line.strip():
                     self._log(line)
 
             if result.get("ok"):
-                self._status(f"✓  اكتملت بنجاح", "ok")
+                self._status("✓  اكتملت بنجاح", "ok")
                 self._log("[bold green]✓  المرحلة اكتملت[/bold green]")
                 self._render_result(result.get("result"))
             else:
-                self._status(f"✗  فشلت", "err")
+                self._status("✗  فشلت", "err")
                 self._log("[bold red]✗  المرحلة فشلت[/bold red]")
         except Exception as e:
-            self._status(f"✗ خطأ: {e}", "err")
-            self._log(f"[red]Exception: {type(e).__name__}: {e}[/red]")
+            import traceback
+            self._status(f"✗ خطأ: {type(e).__name__}", "err")
+            self._log(f"[red]{traceback.format_exc()}[/red]")
         finally:
             self._running = False
             self._progress(False)
@@ -103,23 +112,23 @@ class PhaseTab(Container):
         if not data:
             return
         try:
-            container = self.query_one(f"#results-{self.spec.key}", Container)
+            container = self._find_container()
+            if not container:
+                return
             for w in list(container.children):
                 w.remove()
 
             if self.spec.key == "network" and isinstance(data, dict):
                 ntype = data.get("network_type") or data.get("classification") or "unknown"
-                conf = data.get("confidence", 0)
                 try:
-                    conf_pct = float(conf) * 100
+                    conf_pct = float(data.get("confidence", 0)) * 100
                 except (ValueError, TypeError):
                     conf_pct = 0
-                panel = Static(
+                container.mount(Static(
                     f"[bold cyan]النوع:[/bold cyan]  {ntype}\n"
                     f"[bold cyan]الثقة:[/bold cyan]  {conf_pct:.0f}%",
                     classes="result-panel",
-                )
-                container.mount(panel)
+                ))
             elif self.spec.key == "discovery" and isinstance(data, list):
                 table = DataTable()
                 table.add_columns("IP", "MAC", "المصنّع", "النوع")
@@ -146,8 +155,6 @@ class PhaseTab(Container):
                             str(p.get("risk", "?")),
                         )
                     container.mount(table)
-                else:
-                    container.mount(Static("[yellow]لا توجد منافذ مفتوحة[/yellow]"))
             elif self.spec.key == "vulns" and isinstance(data, list):
                 table = DataTable()
                 table.add_columns("CVE", "الخطورة", "CVSS", "المنفذ")
@@ -159,62 +166,92 @@ class PhaseTab(Container):
                         str(v.get("port", "?")),
                     )
                 container.mount(table)
-            elif self.spec.key == "exploit" and isinstance(data, list):
-                table = DataTable()
-                table.add_columns("CVE", "CVSS", "المنفذ")
-                for p in data:
-                    table.add_row(
-                        str(p.get("cve", "?")),
-                        str(p.get("cvss", "?")),
-                        str(p.get("port", "?")),
-                    )
-                container.mount(table)
         except Exception as e:
             self._log(f"[yellow]ملاحظة عرض: {e}[/yellow]")
+
+    def _find_container(self):
+        try:
+            for c in self.query(Container):
+                if c.id == f"results-{self.spec.key}":
+                    return c
+        except Exception:
+            pass
+        return None
+
+    def _find_log(self):
+        try:
+            for log in self.query(RichLog):
+                if log.id == f"log-{self.spec.key}":
+                    return log
+        except Exception:
+            pass
+        return None
+
+    def _find_status(self):
+        try:
+            for s in self.query(Static):
+                if s.id == f"status-{self.spec.key}":
+                    return s
+        except Exception:
+            pass
+        return None
 
     def _get_input(self):
         if not self.spec.has_input:
             return ""
         try:
-            return self.query_one(f"#input-{self.spec.key}", Input).value.strip()
+            for inp in self.query(Input):
+                if inp.id == f"input-{self.spec.key}":
+                    return inp.value.strip()
         except Exception:
-            return ""
+            pass
+        return ""
 
     def _status(self, msg, kind):
-        try:
-            s = self.query_one(f"#status-{self.spec.key}", Static)
-            s.update(msg)
-            s.remove_class("ready", "running", "ok", "err")
-            s.add_class(kind)
-        except Exception:
-            pass
+        s = self._find_status()
+        if s:
+            try:
+                s.update(msg)
+                s.remove_class("ready", "running", "ok", "err")
+                s.add_class(kind)
+            except Exception:
+                pass
 
     def _log(self, text):
-        try:
-            self.query_one(f"#log-{self.spec.key}", RichLog).write(text)
-        except Exception:
-            pass
+        log = self._find_log()
+        if log:
+            try:
+                log.write(text)
+            except Exception:
+                pass
 
     def _progress(self, on):
         try:
-            pb = self.query_one(f"#progress-{self.spec.key}", ProgressBar)
-            pb.display = on
-            if on:
-                pb.advance(40)
-            else:
-                pb.update(progress=0)
+            for pb in self.query(ProgressBar):
+                if pb.id == f"progress-{self.spec.key}":
+                    pb.display = on
+                    if on:
+                        pb.advance(30)
+                    else:
+                        pb.update(progress=0)
         except Exception:
             pass
 
     def _clear(self):
-        try:
-            self.query_one(f"#log-{self.spec.key}", RichLog).clear()
-            c = self.query_one(f"#results-{self.spec.key}", Container)
-            for w in list(c.children):
-                w.remove()
-            self._status("● جاهز", "ready")
-        except Exception:
-            pass
+        log = self._find_log()
+        if log:
+            try:
+                log.clear()
+            except Exception:
+                pass
+        c = self._find_container()
+        if c:
+            try:
+                for w in list(c.children):
+                    w.remove()
+            except Exception:
+                pass
+        self._status("● جاهز", "ready")
 
 
 class ReconTUI(App):
@@ -234,7 +271,6 @@ class ReconTUI(App):
     .controls { height: 3; margin: 1 0; align: left middle; }
     .run-btn { background: #238636; color: #ffffff; text-style: bold; min-width: 22; margin-right: 1; }
     .run-btn:hover { background: #2ea043; }
-    .run-btn:focus { background: #2ea043; }
     .clear-btn { background: #21262d; color: #c9d1d9; min-width: 10; }
     .clear-btn:hover { background: #30363d; }
     .target-input { background: #0d1117; color: #c9d1d9; border: tall #30363d; margin-right: 1; width: 32; }
@@ -246,9 +282,9 @@ class ReconTUI(App):
     .status.err { color: #f85149; background: #2d0f0f; }
     ProgressBar { height: 1; margin: 0 0 1 0; display: none; }
     ProgressBar > .bar--bar { color: #58a6ff; background: #161b22; }
-    .log-box { background: #000000; border: round #21262d; height: 14; margin: 1 0; }
+    .log-box { background: #000000; border: round #21262d; height: 16; margin: 1 0; }
     .phase-log { background: #000000; color: #7ee787; padding: 1; }
-    .results { height: auto; min-height: 5; margin: 1 0; }
+    .results { height: auto; min-height: 3; margin: 1 0; }
     DataTable { background: #161b22; border: round #30363d; height: auto; max-height: 22; }
     DataTable > .datatable--header { background: #0d1117; color: #79c0ff; text-style: bold; }
     .result-panel { background: #161b22; border: round #3fb950; padding: 1 2; height: auto; }
@@ -275,7 +311,7 @@ class ReconTUI(App):
 
     def on_mount(self) -> None:
         self.title = "Recon Orchestrator — Kali Edition"
-        self.sub_title = f"المنصة: {self.app_state['platform']}  |  جاهز"
+        self.sub_title = f"المنصة: {self.app_state['platform']}"
 
     def action_reset(self) -> None:
         self.app_state["target"] = None
@@ -283,7 +319,7 @@ class ReconTUI(App):
 
     def action_help(self) -> None:
         self.notify(
-            "Q=خروج  |  Ctrl+R=إعادة  |  Ctrl+H=مساعدة  |  انقر تشغيل المرحلة",
+            "Q=خروج  |  Ctrl+R=إعادة  |  Ctrl+H=مساعدة",
             title="مساعدة", timeout=8,
         )
 
