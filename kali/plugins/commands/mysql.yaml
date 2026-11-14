@@ -1,9 +1,30 @@
 service: mysql
 port: 3306
+arabic_name: "قاعدة بيانات MySQL"
+description: "قاعدة بيانات - قد تحتوي على كل بيانات الموقع"
 commands:
   connect:
-    - "mysql -h {target} -u root -p"
+    arabic: "الاتصال"
+    items:
+      - cmd: "mysql -h {target} -u root -p"
+        desc: "محاولة اتصال كـ root"
+        output: "mysql> - prompt إذا نجح"
+        when: "بعد تخمين كلمة المرور"
   brute_force:
-    - "hydra -L users.txt -P pass.txt mysql://{target}"
+    arabic: "تخمين كلمات المرور"
+    items:
+      - cmd: "hydra -L users.txt -P pass.txt mysql://{target}"
+        desc: "هجوم قاموس على MySQL"
+        output: "[3306][mysql] host: X login: root password: Y"
+        when: "قبل الاتصال المباشر"
   enum:
-    - "nmap -p3306 --script mysql-enum,mysql-info,mysql-users {target}"
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p3306 --script mysql-enum,mysql-info,mysql-users {target}"
+        desc: "فحص آلي للـ MySQL"
+        output: "الإصدار + المستخدمين + قواعد البيانات"
+        when: "بعد اكتشاف المنفذ"
+      - cmd: "nmap -p3306 --script mysql-empty-password {target}"
+        desc: "فحص كلمات مرور فارغة"
+        output: "root account with empty password!"
+        when: "دائماً - شائع جداً"

@@ -1,13 +1,43 @@
 service: smb
 port: 445
+arabic_name: "مشاركة ملفات ويندوز (SMB)"
+description: "خدمة ويندوز - إذا اخترقتها قد تسيطر على الشبكة"
 commands:
   enum:
-    - "enum4linux -a {target}"
-    - "smbclient -L //{target}/ -N"
-    - "smbmap -H {target}"
-    - "nmap -p139,445 --script smb-enum-shares,smb-enum-users,smb-os-discovery {target}"
+    arabic: "تعداد شامل"
+    desc: "جمع معلومات عن النطاق والمستخدمين والمشاركات"
+    items:
+      - cmd: "enum4linux -a {target}"
+        desc: "أداة تعداد SMB الشاملة"
+        output: "Users, groups, shares, password policy"
+        when: "أول أمر بعد اكتشاف SMB"
+      - cmd: "smbclient -L //{target}/ -N"
+        desc: "قائمة المشاركات بدون كلمة مرور"
+        output: "Sharename, Type, Comment"
+        when: "سريع - قد تحتاج null session"
+      - cmd: "smbmap -H {target}"
+        desc: "فحص صلاحيات الوصول للمشاركات"
+        output: "READ, WRITE, NO ACCESS لكل share"
+        when: "لمعرفة أين يمكنك الكتابة"
+      - cmd: "nmap -p139,445 --script smb-enum-shares,smb-enum-users,smb-os-discovery {target}"
+        desc: "فحص NSE شامل"
+        output: "Windows version, users, shares"
+        when: "بديل شامل لـ enum4linux"
   shares_access:
-    - "smbclient //{target}/share_name -N"
+    arabic: "الوصول للمشاركات"
+    items:
+      - cmd: "smbclient //{target}/share_name -N"
+        desc: "دخول مشاركة محددة"
+        output: "smb: \\> - prompt داخل المشاركة"
+        when: "بعد اكتشاف اسم المشاركة"
   vulnerabilities:
-    - "nmap -p139,445 --script smb-vuln* {target}"
-    - "nmap -p445 --script smb-vuln-ms17-010 {target}"
+    arabic: "فحص الثغرات الحرجة"
+    items:
+      - cmd: "nmap -p445 --script smb-vuln-ms17-010 {target}"
+        desc: "فحص EternalBlue (WannaCry)"
+        output: "VULNERABLE: MS17-010"
+        when: "دائماً - أخطر ثغرة ويندوز"
+      - cmd: "nmap -p445 --script smb-vuln* {target}"
+        desc: "فحص كل ثغرات SMB"
+        output: "قائمة بالثغرات المكتشفة"
+        when: "للتقرير الشامل"

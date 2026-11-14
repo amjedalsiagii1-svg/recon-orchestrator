@@ -1,14 +1,41 @@
 service: ssh
 port: 22
+arabic_name: "شل آمن (SSH)"
+description: "خدمة الاتصال الآمن عن بعد - هدف رئيسي للاختراق"
 commands:
   version_check:
-    - "nmap -sV -p22 {target}"
-    - "ssh -V"
+    arabic: "فحص الإصدار"
+    desc: "معرفة إصدار SSH لتحديد الثغرات المعروفة"
+    items:
+      - cmd: "nmap -sV -p22 {target}"
+        desc: "فحص إصدار خدمة SSH"
+        output: "OpenSSH 8.2p1 Ubuntu - الإصدار يظهر بجانب كلمة ssh"
+        when: "دائماً كأول خطوة بعد اكتشاف المنفذ"
+      - cmd: "ssh -V"
+        desc: "إصدار SSH المحلي للمقارنة"
+        output: "OpenSSH_9.x, OpenSSL 3.x"
+        when: "لمقارنة إصدارك بإصدار الهدف"
   user_enum:
-    - "ssh-keyscan {target}"
-    - "nmap -p22 --script ssh-auth-methods {target}"
-  auth_test:
-    - "hydra -L users.txt -P pass.txt ssh://{target}"
+    arabic: "تعداد المستخدمين"
+    desc: "محاولة اكتشاف أسماء مستخدمين صالحة"
+    items:
+      - cmd: "nmap -p22 --script ssh-auth-methods {target}"
+        desc: "فحص طرق المصادقة المتاحة"
+        output: "publickey, password - معرفة ما إذا كان password مسموحاً"
+        when: "قبل محاولة brute force"
+      - cmd: "nmap -p22 --script ssh-brute --script-args userdb=users.txt,passdb=pass.txt {target}"
+        desc: "محاولة تخمين كلمات مرور بأمان"
+        output: "أي أزواج user/pass صحيحة تظهر"
+        when: "بعد تعداد المستخدمين"
   vulnerabilities:
-    - "searchsploit openssh"
-    - "nmap -p22 --script ssh2-enum-algos,ssh-hostkey,ssh-run {target}"
+    arabic: "فحص الثغرات"
+    desc: "بحث عن ثغرات معروفة في الإصدار"
+    items:
+      - cmd: "searchsploit openssh 8.2"
+        desc: "بحث في قاعدة exploits"
+        output: "قائمة POCs مع مساراتها"
+        when: "بعد تحديد الإصدار"
+      - cmd: "nmap -p22 --script ssh2-enum-algos {target}"
+        desc: "تعداد الخوارزميات المدعومة (قد تكشف ضعف)"
+        output: "قائمة الخوارزميات - تجنب 3des, arcfour"
+        when: "لفحص تكوين ضعيف"

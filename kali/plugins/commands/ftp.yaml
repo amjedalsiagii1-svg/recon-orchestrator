@@ -1,12 +1,48 @@
 service: ftp
 port: 21
+arabic_name: "نقل الملفات (FTP)"
+description: "خدمة نقل ملفات غير مشفرة - قد تحتوي على ملفات حساسة"
 commands:
   connect:
-    - "ftp {target}"
-    - "nc -v {target} 21"
+    arabic: "الاتصال والفحص الأولي"
+    desc: "معرفة إصدار FTP واختبار الاتصال"
+    items:
+      - cmd: "nmap -sV -p21 {target}"
+        desc: "فحص إصدار FTP"
+        output: "vsftpd 3.0.3 - الإصدار مهم"
+        when: "أول خطوة دائماً"
+      - cmd: "nc -v {target} 21"
+        desc: "اتصال يدوي لرؤية الـ banner"
+        output: "220 (vsFTPd 3.0.3) - رسالة الترحيب"
+        when: "للتأكد من الاستجابة"
   anonymous:
-    - "curl ftp://anonymous:test@{target}/"
+    arabic: "اختبار الدخول المجهول"
+    desc: "كثير من سيرفرات FTP تسمح بالدخول بدون كلمة مرور"
+    items:
+      - cmd: "curl ftp://anonymous:test@{target}/"
+        desc: "محاولة دخول مجهول"
+        output: "قائمة ملفات إذا نجح - أو خطأ إذا فشل"
+        when: "دائماً - قد تجد ملفات دون جهد"
+      - cmd: "nmap -p21 --script ftp-anon {target}"
+        desc: "فحص آلي للدخول المجهول"
+        output: "Anonymous FTP login allowed"
+        when: "بديل أسرع للأمر السابق"
   brute_force:
-    - "hydra -L users.txt -P pass.txt ftp://{target}"
+    arabic: "تخمين كلمات المرور"
+    desc: "محاولة تخمين بيانات دخول"
+    items:
+      - cmd: "hydra -L users.txt -P pass.txt ftp://{target}"
+        desc: "هجوم القاموس"
+        output: "[21][ftp] host: X login: Y password: Z"
+        when: "بعد فشل anonymous"
   vulnerabilities:
-    - "nmap -p21 --script ftp-anon,ftp-bounce,ftp-vuln* {target}"
+    arabic: "فحص الثغرات"
+    items:
+      - cmd: "nmap -p21 --script ftp-vuln* {target}"
+        desc: "فحص ثغرات FTP المعروفة"
+        output: "VULNERABLE entries if found"
+        when: "لإصدارات قديمة"
+      - cmd: "searchsploit vsftpd 3.0.3"
+        desc: "بحث في exploit-db"
+        output: "قائمة ثغرات معروفة"
+        when: "بعد تحديد الإصدار"

@@ -1,10 +1,32 @@
 service: dns
 port: 53
+arabic_name: "نظام أسماء النطاقات (DNS)"
+description: "خدمة DNS - قد تكشف بنية الشبكة الداخلية"
 commands:
   enum:
-    - "dig @{target} version.bind chaos txt"
-    - "nmap -p53 --script dns-recursion,dns-service-discovery {target}"
-    - "dnsrecon -d example.com -n {target}"
+    arabic: "تعداد"
+    items:
+      - cmd: "dig @{target} version.bind chaos txt"
+        desc: "سؤال DNS عن إصداره (قد يكشف)"
+        output: "version.bind. TXT \"9.11.3\" - الإصدار"
+        when: "أول أمر - سريع جداً"
+      - cmd: "nmap -p53 --script dns-recursion {target}"
+        desc: "فحص إذا كان يقبل استعلامات recursion"
+        output: "Recursion appears to be enabled"
+        when: "قد يستخدم في DNS amplification"
+      - cmd: "dnsrecon -d example.com -n {target}"
+        desc: "تعداد شامل للنطاق"
+        output: "MX, NS, A, TXT records"
+        when: "بعد تحديد النطاق"
   zone_transfer:
-    - "dig @{target} axfr example.com"
-    - "dnsenum --dnsserver {target} example.com"
+    arabic: "نقل المنطقة (خطير)"
+    desc: "إذا نجح، تحصل على كل سجلات DNS"
+    items:
+      - cmd: "dig @{target} axfr example.com"
+        desc: "محاولة AXFR"
+        output: "كل السجلات إذا كان مسموحاً"
+        when: "نادر لكن حاسم إذا نجح"
+      - cmd: "dnsenum --dnsserver {target} example.com"
+        desc: "أداة شاملة (تجرب AXFR تلقائياً)"
+        output: "Subdomains, hosts, mail servers"
+        when: "بديل شامل"

