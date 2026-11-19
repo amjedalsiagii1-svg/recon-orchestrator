@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QInputDialog,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTableWidget,
@@ -21,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from sf_desktop.scope_guard import validate_scope_entry
+from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.environment import (
     PROJECT_ROOT,
     detect_environment,
@@ -147,8 +150,9 @@ class MainWindow(QMainWindow):
         ("الرئيسية", 0),
         ("مراحل العمل", 1),
         ("النطاق المصرح", 2),
-        ("التقارير", 3),
-        ("تشخيص النظام", 4),
+        ("الجلسات", 3),
+        ("التقارير", 4),
+        ("تشخيص النظام", 5),
     ]
 
     def __init__(self) -> None:
@@ -158,11 +162,18 @@ class MainWindow(QMainWindow):
         self.resize(1360, 820)
         self._snapshot = detect_environment()
         self._scope_entries, self._scope_error = read_scope_file()
+        try:
+            self.store = SFStore()
+            self._storage_error = None
+        except (OSError, StoreError) as exc:
+            self.store = None
+            self._storage_error = str(exc)
         self._nav_buttons: list[QPushButton] = []
         self._page_titles = [
             ("لوحة التحكم", "نظرة عامة على حالة SF والبيئة المحلية"),
             ("مراحل العمل", "مسار منظم من فهم البيئة إلى مراجعة التقرير"),
             ("النطاق المصرح", "فحص سياسة النطاق المحلية دون اتصال بالأهداف"),
+            ("الجلسات", "إنشاء جلسات محلية وحفظ سجل العمل"),
             ("التقارير", "عرض ملفات HTML الموجودة دون فتح أو تعديل محتواها"),
             ("تشخيص النظام", "معلومات محلية عن النظام والاعتماديات المتاحة"),
         ]
@@ -230,6 +241,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_dashboard())
         self.stack.addWidget(self._build_phases())
         self.stack.addWidget(self._build_scope())
+        self.stack.addWidget(self._build_sessions())
         self.stack.addWidget(self._build_reports())
         self.stack.addWidget(self._build_diagnostics())
         content_layout.addWidget(self.stack, 1)
@@ -264,10 +276,12 @@ class MainWindow(QMainWindow):
         grid.setSpacing(12)
         self.metric_os = _card("النظام", "—", "بيانات محلية")
         self.metric_python = _card("إصدار Python", "—", "بيئة التشغيل")
-        self.metric_scope = _card("النطاق المهيأ", "—", "صيغة الإعداد فقط")
+        self.metric_scope = _card("النطاق المهيأ", "—", "سياسة SF المحلية")
+        self.metric_sessions = _card("الجلسات المحفوظة", "—", "بيانات محلية على هذا الجهاز")
         self.metric_reports = _card("تقارير HTML", "—", "الملفات الموجودة")
         for i, frame in enumerate(
-            (self.metric_os, self.metric_python, self.metric_scope, self.metric_reports)
+            (self.metric_os, self.metric_python, self.metric_scope,
+             self.metric_sessions, self.metric_reports)
         ):
             grid.addWidget(frame, i // 2, i % 2)
         layout.addLayout(grid)
@@ -344,6 +358,85 @@ class MainWindow(QMainWindow):
         layout.addWidget(notice)
         return page
 
+    def _build_sessions(self) -> QWidget:
+        page, layout = _page_container()
+        header = QHBoxLayout()
+        header.addWidget(_label("جلسات SF المحلية", "SectionTitle"))
+        header.addStretch(1)
+        create_button = QPushButton("إنشاء جلسة جديدة")
+        create_button.setObjectName("ActionButton")
+        create_button.clicked.connect(self._create_session)
+        header.addWidget(create_button)
+        refresh_button = QPushButton("تحديث")
+        refresh_button.clicked.connect(self._refresh_sessions_table)
+        header.addWidget(refresh_button)
+        layout.addLayout(header)
+        layout.addWidget(_label(
+            "تُحفظ بيانات الجلسات على هذا الجهاز فقط. لا يبدأ إنشاء الجلسة أي فحص أو اتصال.",
+            "Muted",
+        ))
+        self.sessions_table = QTableWidget(0, 4)
+        self.sessions_table.setHorizontalHeaderLabels(
+            ["معرّف الجلسة", "الاسم", "الحالة", "آخر تحديث"]
+        )
+        self.sessions_table.setAlternatingRowColors(True)
+        self.sessions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.sessions_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.sessions_table, 1)
+        self.sessions_status = _label("", "Muted")
+        layout.addWidget(self.sessions_status)
+        return page
+
+    def _create_session(self) -> None:
+        if self.store is None:
+            QMessageBox.warning(
+                self, "تعذر إنشاء الجلسة",
+                f"مخزن SF المحلي غير متاح: {self._storage_error or 'خطأ غير معروف'}",
+            )
+            return
+        name, accepted = QInputDialog.getText(
+            self, "جلسة جديدة", "اسم الجلسة:"
+        )
+        if not accepted:
+            return
+        try:
+            record = self.store.create_session(name)
+            self._refresh_sessions_table()
+            self.sessions_status.setText(
+                f"تم إنشاء الجلسة المحلية: {record['id']}"
+            )
+        except (ValueError, StoreError, OSError) as exc:
+            QMessageBox.warning(self, "تعذر إنشاء الجلسة", str(exc))
+
+    def _refresh_sessions_table(self) -> None:
+        if not hasattr(self, "sessions_table"):
+            return
+        self.sessions_table.setRowCount(0)
+        if self.store is None:
+            self.sessions_status.setText(
+                f"مخزن الجلسات غير متاح: {self._storage_error or 'غير معروف'}"
+            )
+            return
+        try:
+            sessions = self.store.list_sessions(limit=50)
+        except (StoreError, OSError) as exc:
+            self.sessions_status.setText(f"تعذر قراءة الجلسات: {exc}")
+            return
+        for session in sessions:
+            row = self.sessions_table.rowCount()
+            self.sessions_table.insertRow(row)
+            values = (
+                session["id"],
+                session["name"],
+                "مفتوحة" if session["status"] == "open" else "مغلقة",
+                session["updated_at"],
+            )
+            for column, value in enumerate(values):
+                self.sessions_table.setItem(row, column, QTableWidgetItem(str(value)))
+        self.sessions_status.setText(
+            f"عدد الجلسات المحفوظة: {len(sessions)}"
+        )
+
     def _build_reports(self) -> QWidget:
         page, layout = _page_container()
         layout.addWidget(_label("مخرجات التقارير", "SectionTitle"))
@@ -398,8 +491,12 @@ class MainWindow(QMainWindow):
         self.metric_scope.findChild(QLabel, "Metric").setText(
             f"{allowed_count} مسموح / {denied_count} مرفوض"
         )
+        self.metric_sessions.findChild(QLabel, "Metric").setText(
+            str(len(self.store.list_sessions(limit=1000))) if self.store else "غير متاح"
+        )
         self.metric_reports.findChild(QLabel, "Metric").setText(str(len(list_html_reports())))
         self._refresh_scope_table()
+        self._refresh_sessions_table()
         self._refresh_reports_table()
         self._refresh_diagnostics_table()
 
