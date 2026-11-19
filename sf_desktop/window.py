@@ -491,9 +491,12 @@ class MainWindow(QMainWindow):
         self.metric_scope.findChild(QLabel, "Metric").setText(
             f"{allowed_count} مسموح / {denied_count} مرفوض"
         )
-        self.metric_sessions.findChild(QLabel, "Metric").setText(
-            str(len(self.store.list_sessions(limit=1000))) if self.store else "غير متاح"
-        )
+        try:
+            session_count = len(self.store.list_sessions(limit=1000)) if self.store else "غير متاح"
+        except (StoreError, OSError) as exc:
+            session_count = "خطأ"
+            self._storage_error = str(exc)
+        self.metric_sessions.findChild(QLabel, "Metric").setText(str(session_count))
         self.metric_reports.findChild(QLabel, "Metric").setText(str(len(list_html_reports())))
         self._refresh_scope_table()
         self._refresh_sessions_table()

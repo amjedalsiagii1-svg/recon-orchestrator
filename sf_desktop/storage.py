@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import contextmanager
+from collections.abc import Iterator
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +31,12 @@ def _now() -> str:
 
 
 def default_database_path() -> Path:
-    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    configured = os.environ.get("XDG_DATA_HOME", "").strip()
+    candidate = Path(configured).expanduser() if configured else None
+    base = (
+        candidate if candidate is not None and candidate.is_absolute()
+        else Path.home() / ".local" / "share"
+    )
     return base / "sf" / "sf.sqlite3"
 
 
@@ -46,12 +53,21 @@ class SFStore:
         except (OSError, sqlite3.Error) as exc:
             raise StoreError(f"تعذر تهيئة قاعدة بيانات SF المحلية: {exc}") from exc
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Open one connection, commit or roll back, and always close it."""
         connection = sqlite3.connect(self.path, timeout=5.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA busy_timeout = 5000")
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA busy_timeout = 5000")
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:
