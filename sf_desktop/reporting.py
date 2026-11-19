@@ -16,6 +16,7 @@ from typing import Any
 
 from sf_desktop.environment import PROJECT_ROOT
 from sf_desktop.storage import SFStore, StoreError
+from sf_desktop.advisor import commands_for_report, recommendations_for_evidence, severity_counts
 
 REPORT_VERSION = "0.1"
 MAX_REPORT_EVIDENCE = 5000
@@ -64,6 +65,44 @@ def _render(session: dict[str, str], evidence: list[dict[str, Any]]) -> str:
     )
     created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     status = "جلسة مفتوحة" if session.get("status") == "open" else "جلسة مغلقة"
+    severity = severity_counts(evidence)
+    severity_labels = {
+        "critical": "حرج",
+        "high": "مرتفع",
+        "medium": "متوسط",
+        "low": "منخفض",
+        "info": "معلوماتي",
+        "unspecified": "غير محدد",
+    }
+    severity_cards = "".join(
+        f"<div class='metric'><span class='muted'>{_e(severity_labels[key])}</span>"
+        f"<strong>{severity[key]}</strong></div>"
+        for key in ("critical", "high", "medium", "low", "info", "unspecified")
+        if severity[key]
+    ) or "<p class='muted'>لا توجد درجات خطورة مسجلة.</p>"
+
+    recommendations = recommendations_for_evidence(evidence)
+    recommendation_rows = "".join(
+        "<tr>"
+        f"<td>{_e(item['priority'])}</td>"
+        f"<td>{_e(item['title'])}</td>"
+        f"<td>{_e(item['reason'])}</td>"
+        f"<td>{_e(item['action'])}</td>"
+        "</tr>"
+        for item in recommendations
+    ) or "<tr><td colspan='4' class='empty'>تظهر التوصيات بعد تسجيل أدلة أو ملاحظات.</td></tr>"
+
+    command_rows = "".join(
+        "<tr>"
+        f"<td>{_e(command.title)}</td>"
+        f"<td><code>{_e(command.command)}</code></td>"
+        f"<td>{_e(command.purpose)}</td>"
+        f"<td>{_e(command.expected)}</td>"
+        f"<td>{_e(command.prerequisites)}<br>{_e(command.impact)}</td>"
+        "</tr>"
+        for command in commands_for_report()
+    )
+
 
     return f"""<!doctype html>
 <html lang="ar" dir="rtl">
@@ -127,6 +166,11 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
   <p class="muted">وقت إنشاء التقرير: {_e(created)}</p>
 </section>
 <section class="panel">
+  <h2>ملخص درجات الخطورة المدخلة</h2>
+  <p class="muted">يعرض هذا الملخص القيم المسجلة صراحةً في الأدلة، ولا ينشئ تصنيفاً تلقائياً.</p>
+  <div class="grid">{severity_cards}</div>
+</section>
+<section class="panel">
   <h2>الأدلة والملاحظات المسجلة</h2>
   <p class="muted">يعرض هذا القسم السجلات الموجودة في قاعدة بيانات SF لهذه الجلسة فقط.
   مستوى الثقة المنقول هو القيمة المسجلة، وليس حكماً مستقلاً من التقرير.</p>
@@ -134,6 +178,22 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
     <thead><tr><th>#</th><th>الفئة</th><th>العنوان</th><th>التفاصيل</th>
       <th>المصدر</th><th>وقت التسجيل</th><th>الثقة</th></tr></thead>
     <tbody>{evidence_body}</tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2>توصيات المراجعة والمعالجة</h2>
+  <p class="muted">توصيات إرشادية مبنية على فئة السجل ودرجته المدخلة. راجع الدليل والسياق قبل اتخاذ إجراء.</p>
+  <table>
+    <thead><tr><th>الأولوية</th><th>التوصية</th><th>سببها</th><th>الخطوة المقترحة</th></tr></thead>
+    <tbody>{recommendation_rows}</tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2>أوامر تحقق محلية آمنة</h2>
+  <p class="muted">الأوامر أدناه استعلامية على جهاز Kali المحلي. لا تنفذ فحصاً على هدف بعيد ولا تغيّر إعدادات النظام. اقرأ المتطلبات والنتيجة المتوقعة قبل تشغيل أي أمر يدوياً.</p>
+  <table>
+    <thead><tr><th>الغرض</th><th>الأمر</th><th>وظيفته</th><th>النتيجة المتوقعة</th><th>المتطلبات والأثر</th></tr></thead>
+    <tbody>{command_rows}</tbody>
   </table>
 </section>
 <section class="panel">
