@@ -64,3 +64,25 @@ def test_report_rejects_missing_session(tmp_path):
     store = SFStore(tmp_path / "sf.sqlite3")
     with pytest.raises(ReportError):
         generate_session_report(store, "missing", tmp_path / "out")
+
+
+def test_report_contains_explainable_guidance_and_safe_commands(tmp_path):
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("جلسة مراجعة خدمة")
+    store.add_evidence(
+        session["id"],
+        source="user-entered",
+        category="service",
+        title="خدمة محلية",
+        detail="خدمة تستمع محلياً وتحتاج إلى مراجعة سبب تشغيلها.",
+        confidence=0.7,
+        payload={"severity": "high", "verification_status": "unverified"},
+    )
+    report = generate_session_report(store, session["id"], tmp_path / "out")
+    content = report.read_text(encoding="utf-8")
+    assert "مراجعة الحاجة إلى الخدمة" in content
+    assert "ip -br address" in content
+    assert "ss -lntup" in content
+    assert "ماذا يفعل؟" in content
+    assert "غير متحققة" not in content  # report labels are tied to recorded status only
+    assert "لا تُعرض نتائج فحص لم تُنفذ" in content

@@ -217,7 +217,7 @@ class MainWindow(QMainWindow):
             side.addWidget(button)
 
         side.addStretch(1)
-        side.addWidget(_label("إصدار الواجهة 0.1.0", "BrandCaption"))
+        side.addWidget(_label("إصدار الواجهة 0.2.0", "BrandCaption"))
         side.addWidget(_label("وضع المعاينة المحلية", "BrandCaption"))
 
         content = QWidget()
