@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QAbstractItemView,
     QInputDialog,
     QMessageBox,
     QPushButton,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from sf_desktop.scope_guard import validate_scope_entry
 from sf_desktop.storage import SFStore, StoreError
+from sf_desktop.reporting import ReportError, generate_session_report
 from sf_desktop.environment import (
     PROJECT_ROOT,
     detect_environment,
@@ -381,8 +383,20 @@ class MainWindow(QMainWindow):
         )
         self.sessions_table.setAlternatingRowColors(True)
         self.sessions_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.sessions_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.sessions_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.sessions_table.itemSelectionChanged.connect(self._on_session_selection_changed)
         self.sessions_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.sessions_table, 1)
+
+        actions = QHBoxLayout()
+        self.export_report_button = QPushButton("إنشاء / تحديث تقرير HTML")
+        self.export_report_button.setObjectName("ActionButton")
+        self.export_report_button.setEnabled(False)
+        self.export_report_button.clicked.connect(self._export_selected_report)
+        actions.addWidget(self.export_report_button)
+        actions.addStretch(1)
+        layout.addLayout(actions)
         self.sessions_status = _label("", "Muted")
         layout.addWidget(self.sessions_status)
         return page
@@ -436,12 +450,52 @@ class MainWindow(QMainWindow):
         self.sessions_status.setText(
             f"عدد الجلسات المحفوظة: {len(sessions)}"
         )
+        self.export_report_button.setEnabled(False)
+
+    def _on_session_selection_changed(self) -> None:
+        row = self.sessions_table.currentRow()
+        item = self.sessions_table.item(row, 0) if row >= 0 else None
+        session_id = item.text() if item else ""
+        self.export_report_button.setEnabled(bool(session_id and self.store))
+        if not session_id or self.store is None:
+            return
+        try:
+            session = self.store.get_session(session_id)
+            evidence_count = len(self.store.list_evidence(session_id))
+            if session:
+                self.sessions_status.setText(
+                    f"المحدد: {session['name']} | "
+                    f"الأدلة المسجلة: {evidence_count} | "
+                    f"الحالة: {'مفتوحة' if session['status'] == 'open' else 'مغلقة'}"
+                )
+        except (StoreError, OSError) as exc:
+            self.sessions_status.setText(f"تعذر قراءة تفاصيل الجلسة: {exc}")
+
+    def _export_selected_report(self) -> None:
+        row = self.sessions_table.currentRow()
+        item = self.sessions_table.item(row, 0) if row >= 0 else None
+        if item is None or self.store is None:
+            QMessageBox.information(self, "اختر جلسة", "حدد جلسة من الجدول أولاً.")
+            return
+        try:
+            path = generate_session_report(self.store, item.text())
+            self._refresh_reports_table()
+            self.metric_reports.findChild(QLabel, "Metric").setText(
+                str(len(list_html_reports()))
+            )
+            self.sessions_status.setText(f"تم إنشاء التقرير: {path}")
+            QMessageBox.information(
+                self, "تقرير SF جاهز",
+                f"تم إنشاء تقرير HTML أو تحديث التقرير السابق للجلسة نفسها.\n\n{path}",
+            )
+        except (ReportError, OSError, StoreError) as exc:
+            QMessageBox.warning(self, "تعذر إنشاء التقرير", str(exc))
 
     def _build_reports(self) -> QWidget:
         page, layout = _page_container()
         layout.addWidget(_label("مخرجات التقارير", "SectionTitle"))
         layout.addWidget(_label(
-            "يعرض SF ملفات HTML الموجودة في مجلد التقارير فقط. لا ينشئ التقرير في هذه المرحلة.",
+            "يعرض SF تقارير الجلسات بصيغة HTML. إعادة التوليد تحدث تقرير الجلسة نفسه بدلاً من إنشاء نسخ متكررة.",
             "Muted",
         ))
         self.report_table = QTableWidget(0, 3)

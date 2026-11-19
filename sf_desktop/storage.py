@@ -153,6 +153,20 @@ class SFStore:
         except sqlite3.Error as exc:
             raise StoreError(f"تعذر قراءة الجلسات: {exc}") from exc
 
+    def get_session(self, session_id: str) -> dict[str, str] | None:
+        """Return one session by its opaque local identifier."""
+        clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT id, name, status, created_at, updated_at "
+                    "FROM sessions WHERE id=?",
+                    (clean_id,),
+                ).fetchone()
+            return dict(row) if row else None
+        except sqlite3.Error as exc:
+            raise StoreError(f"تعذر قراءة الجلسة: {exc}") from exc
+
     def close_session(self, session_id: str) -> bool:
         clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
         try:
