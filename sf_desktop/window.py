@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from sf_desktop.scope_guard import validate_scope_entry
 from sf_desktop.environment import (
     PROJECT_ROOT,
     detect_environment,
@@ -166,7 +167,7 @@ class MainWindow(QMainWindow):
         self._page_titles = [
             ("لوحة التحكم", "نظرة عامة على حالة SF والبيئة المحلية"),
             ("مراحل العمل", "مسار منظم من فهم البيئة إلى مراجعة التقرير"),
-            ("النطاق المصرح", "قراءة إعداد النطاق والتحقق من صيغته محلياً فقط"),
+            ("النطاق المصرح", "فحص سياسة النطاق المحلية دون اتصال بالأهداف"),
             ("التقارير", "عرض ملفات HTML الموجودة دون فتح أو تعديل محتواها"),
             ("تشخيص النظام", "معلومات محلية عن النظام والاعتماديات المتاحة"),
         ]
@@ -324,9 +325,9 @@ class MainWindow(QMainWindow):
             f"المسار: {PROJECT_ROOT / 'config' / 'scope.txt'}", "Muted"
         )
         layout.addWidget(self.scope_path_label)
-        self.scope_table = QTableWidget(0, 4)
+        self.scope_table = QTableWidget(0, 5)
         self.scope_table.setHorizontalHeaderLabels(
-            ["العنصر", "النوع", "التحقق الشكلي", "ملاحظة"]
+            ["العنصر", "النوع", "الصيغة", "سياسة SF", "سبب القرار"]
         )
         self.scope_table.setAlternatingRowColors(True)
         self.scope_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -397,10 +398,10 @@ class MainWindow(QMainWindow):
         snapshot = self._snapshot
         self.metric_os.findChild(QLabel, "Metric").setText(snapshot.distribution)
         self.metric_python.findChild(QLabel, "Metric").setText(snapshot.python_version)
-        valid_count = sum(entry.valid for entry in self._scope_entries)
-        invalid_count = sum(not entry.valid for entry in self._scope_entries)
+        allowed_count = sum(validate_scope_entry(entry.value).allowed for entry in self._scope_entries)
+        denied_count = len(self._scope_entries) - allowed_count
         self.metric_scope.findChild(QLabel, "Metric").setText(
-            f"{valid_count} صحيح / {invalid_count} غير صحيح"
+            f"{allowed_count} مسموح / {denied_count} مرفوض"
         )
         self.metric_reports.findChild(QLabel, "Metric").setText(str(len(list_html_reports())))
         self._refresh_scope_table()
@@ -413,21 +414,24 @@ class MainWindow(QMainWindow):
         for entry in self._scope_entries:
             row = table.rowCount()
             table.insertRow(row)
+            decision = validate_scope_entry(entry.value)
             values = (
                 entry.value,
                 entry.kind,
-                "صالح شكلياً" if entry.valid else "غير صالح",
-                entry.message,
+                "صالح" if entry.valid else "غير صالح",
+                "مسموح محلياً" if decision.allowed else "مرفوض",
+                decision.reason,
             )
             for column, value in enumerate(values):
                 table.setItem(row, column, QTableWidgetItem(value))
         if self._scope_error:
             self.scope_summary.setText(f"تعذر قراءة الملف: {self._scope_error}")
         else:
-            invalid = sum(not item.valid for item in self._scope_entries)
+            allowed = sum(validate_scope_entry(item.value).allowed for item in self._scope_entries)
+            denied = len(self._scope_entries) - allowed
             self.scope_summary.setText(
                 f"عدد الإدخالات: {len(self._scope_entries)} | "
-                f"إدخالات غير صالحة: {invalid}"
+                f"مسموح بسياسة SF: {allowed} | مرفوض: {denied}"
             )
 
     def _refresh_reports_table(self) -> None:
