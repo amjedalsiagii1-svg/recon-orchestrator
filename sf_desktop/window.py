@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 from sf_desktop.scope_guard import validate_scope_entry
 from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.reporting import ReportError, generate_session_report
+from sf_desktop.advisor import SAFE_COMMANDS, SEVERITY_LABELS, recommendations_for_evidence
 from sf_desktop.environment import (
     PROJECT_ROOT,
     detect_environment,
@@ -153,8 +156,10 @@ class MainWindow(QMainWindow):
         ("مراحل العمل", 1),
         ("النطاق المصرح", 2),
         ("الجلسات", 3),
-        ("التقارير", 4),
-        ("تشخيص النظام", 5),
+        ("الأدلة والنتائج", 4),
+        ("الأوامر والإرشادات", 5),
+        ("التقارير", 6),
+        ("تشخيص النظام", 7),
     ]
 
     def __init__(self) -> None:
@@ -176,6 +181,8 @@ class MainWindow(QMainWindow):
             ("مراحل العمل", "مسار منظم من فهم البيئة إلى مراجعة التقرير"),
             ("النطاق المصرح", "فحص سياسة النطاق المحلية دون اتصال بالأهداف"),
             ("الجلسات", "إنشاء جلسات محلية وحفظ سجل العمل"),
+            ("الأدلة والنتائج", "تجميع السجلات ومراجعتها دون اختلاق استنتاجات"),
+            ("الأوامر والإرشادات", "أوامر محلية مع شرحها ومتطلباتها ونتائجها المتوقعة"),
             ("التقارير", "عرض ملفات HTML الموجودة دون فتح أو تعديل محتواها"),
             ("تشخيص النظام", "معلومات محلية عن النظام والاعتماديات المتاحة"),
         ]
@@ -244,6 +251,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_phases())
         self.stack.addWidget(self._build_scope())
         self.stack.addWidget(self._build_sessions())
+        self.stack.addWidget(self._build_evidence())
+        self.stack.addWidget(self._build_commands())
         self.stack.addWidget(self._build_reports())
         self.stack.addWidget(self._build_diagnostics())
         content_layout.addWidget(self.stack, 1)
@@ -416,6 +425,7 @@ class MainWindow(QMainWindow):
         try:
             record = self.store.create_session(name)
             self._refresh_sessions_table()
+            self._refresh_evidence_sessions()
             self.sessions_status.setText(
                 f"تم إنشاء الجلسة المحلية: {record['id']}"
             )
@@ -491,6 +501,238 @@ class MainWindow(QMainWindow):
         except (ReportError, OSError, StoreError) as exc:
             QMessageBox.warning(self, "تعذر إنشاء التقرير", str(exc))
 
+    def _build_evidence(self) -> QWidget:
+        page, layout = _page_container()
+        header = QHBoxLayout()
+        header.addWidget(_label("الأدلة والنتائج المسجلة", "SectionTitle"))
+        header.addStretch(1)
+        self.evidence_session_combo = QComboBox()
+        self.evidence_session_combo.setMinimumWidth(260)
+        self.evidence_session_combo.currentIndexChanged.connect(
+            self._refresh_evidence_table
+        )
+        header.addWidget(self.evidence_session_combo)
+        add_button = QPushButton("إضافة دليل / ملاحظة")
+        add_button.setObjectName("ActionButton")
+        add_button.clicked.connect(self._add_manual_evidence)
+        header.addWidget(add_button)
+        refresh_button = QPushButton("تحديث")
+        refresh_button.clicked.connect(self._refresh_evidence_sessions)
+        header.addWidget(refresh_button)
+        layout.addLayout(header)
+        layout.addWidget(_label(
+            "السجلات التي تضيفها يدوياً ستُوسم بوضوح بأنها مدخلة من المستخدم وغير متحققة آلياً. "
+            "لا يحوّل SF الملاحظة تلقائياً إلى ثغرة مؤكدة.",
+            "Muted",
+        ))
+        self.evidence_table = QTableWidget(0, 7)
+        self.evidence_table.setHorizontalHeaderLabels(
+            ["الفئة", "العنوان", "التفاصيل", "الخطورة المدخلة", "الثقة المدخلة", "المصدر", "وقت التسجيل"]
+        )
+        self.evidence_table.setAlternatingRowColors(True)
+        self.evidence_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.evidence_table.setWordWrap(True)
+        self.evidence_table.horizontalHeader().setStretchLastSection(True)
+        self.evidence_table.setColumnWidth(2, 300)
+        layout.addWidget(self.evidence_table, 1)
+        self.evidence_advice = _label(
+            "تظهر هنا توصيات مراجعة وإصلاح مرتبطة بفئة الأدلة المسجلة.",
+            "Muted",
+        )
+        layout.addWidget(self.evidence_advice)
+        self.evidence_status = _label("", "Muted")
+        layout.addWidget(self.evidence_status)
+        return page
+
+    def _refresh_evidence_sessions(self) -> None:
+        if not hasattr(self, "evidence_session_combo"):
+            return
+        combo = self.evidence_session_combo
+        current_id = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        if self.store is not None:
+            try:
+                for session in self.store.list_sessions(limit=100):
+                    label = f"{session['name']} · {session['id'][:8]}"
+                    combo.addItem(label, session["id"])
+            except (StoreError, OSError) as exc:
+                self.evidence_status.setText(f"تعذر تحميل الجلسات: {exc}")
+        if current_id:
+            index = combo.findData(current_id)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        self._refresh_evidence_table()
+
+    def _refresh_evidence_table(self, *_args) -> None:
+        if not hasattr(self, "evidence_table"):
+            return
+        table = self.evidence_table
+        table.setRowCount(0)
+        session_id = self.evidence_session_combo.currentData()
+        if not session_id or self.store is None:
+            self.evidence_status.setText("أنشئ جلسة أولاً لبدء حفظ الأدلة والملاحظات.")
+            self.evidence_advice.setText("لا توجد جلسة محددة.")
+            return
+        try:
+            evidence = self.store.list_evidence(session_id)
+        except (StoreError, OSError) as exc:
+            self.evidence_status.setText(f"تعذر قراءة الأدلة: {exc}")
+            return
+        for record in evidence:
+            payload = record.get("payload") or {}
+            severity_key = str(payload.get("severity", "unspecified")).lower()
+            severity_label = SEVERITY_LABELS.get(severity_key, "غير محدد")
+            row = table.rowCount()
+            table.insertRow(row)
+            values = (
+                record["category"],
+                record["title"],
+                record["detail"],
+                severity_label,
+                f"{float(record['confidence']) * 100:.0f}%",
+                record["source"],
+                record["observed_at"],
+            )
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(str(value)))
+        recommendations = recommendations_for_evidence(evidence)
+        if recommendations:
+            lines = ["توصيات المراجعة:"]
+            for item in recommendations[:8]:
+                lines.append(f"• {item['priority']}: {item['title']} — {item['action']}")
+            self.evidence_advice.setText("\n".join(lines))
+        else:
+            self.evidence_advice.setText(
+                "لا توجد توصيات بعد. أضف سجلاً موثقاً لتظهر توصيات مرتبطة به."
+            )
+        self.evidence_status.setText(
+            f"الأدلة المسجلة: {len(evidence)} | "
+            "السجلات اليدوية تبقى غير متحققة حتى تؤكدها بمصدر مستقل."
+        )
+
+    def _add_manual_evidence(self) -> None:
+        if self.store is None:
+            QMessageBox.warning(self, "التخزين غير متاح", self._storage_error or "تعذر فتح قاعدة البيانات.")
+            return
+        session_id = self.evidence_session_combo.currentData()
+        if not session_id:
+            QMessageBox.information(self, "اختر جلسة", "أنشئ جلسة أو حدد جلسة أولاً.")
+            return
+
+        categories = [
+            ("أصل / جهاز", "asset"),
+            ("خدمة", "service"),
+            ("إعدادات", "configuration"),
+            ("ملاحظة أمنية تحتاج تحققاً", "finding"),
+            ("ملاحظة عامة", "note"),
+        ]
+        category_labels = [item[0] for item in categories]
+        chosen, accepted = QInputDialog.getItem(
+            self, "فئة الدليل", "اختر فئة السجل:", category_labels, 0, False
+        )
+        if not accepted:
+            return
+        category = dict(categories)[chosen]
+
+        title, accepted = QInputDialog.getText(
+            self, "عنوان الدليل", "أدخل عنواناً موجزاً:"
+        )
+        if not accepted:
+            return
+        detail, accepted = QInputDialog.getMultiLineText(
+            self, "تفاصيل الدليل", "ما الذي تمت ملاحظته؟ أضف المصدر والسياق إن توفر:"
+        )
+        if not accepted:
+            return
+
+        severity_choices = [
+            ("غير محدد", "unspecified"),
+            ("معلوماتي", "info"),
+            ("منخفض", "low"),
+            ("متوسط", "medium"),
+            ("مرتفع", "high"),
+            ("حرج", "critical"),
+        ]
+        severity_label, accepted = QInputDialog.getItem(
+            self, "الخطورة المسجلة", "اختر الدرجة كما وردت في المصدر، أو اتركها غير محددة:",
+            [item[0] for item in severity_choices], 0, False
+        )
+        if not accepted:
+            return
+        severity = dict(severity_choices)[severity_label]
+        confidence, accepted = QInputDialog.getDouble(
+            self, "الثقة بالمعلومة", "تقييمك لموثوقية هذا السجل (ليس احتمال وجود ثغرة):",
+            0.5, 0.0, 1.0, 2
+        )
+        if not accepted:
+            return
+        try:
+            self.store.add_evidence(
+                session_id,
+                source="user-entered",
+                category=category,
+                title=title,
+                detail=detail,
+                confidence=confidence,
+                payload={
+                    "severity": severity,
+                    "provenance": "user-entered",
+                    "verification_status": "unverified",
+                },
+            )
+            self._refresh_evidence_table()
+            self.sessions_status.setText("تم حفظ الدليل في الجلسة المحددة.")
+        except (ValueError, StoreError, OSError) as exc:
+            QMessageBox.warning(self, "تعذر حفظ الدليل", str(exc))
+
+    def _build_commands(self) -> QWidget:
+        page, layout = _page_container()
+        layout.addWidget(_label("مكتبة الأوامر والإرشادات", "SectionTitle"))
+        layout.addWidget(_label(
+            "هذه أوامر استعلام محلية على جهاز Kali. لا تنفذها SF تلقائياً، ولا تستهدف أجهزة بعيدة، "
+            "ولا تغيّر إعدادات النظام. اقرأ الوظيفة والمتطلبات والنتيجة المتوقعة قبل النسخ.",
+            "Muted",
+        ))
+        self.commands_table = QTableWidget(len(SAFE_COMMANDS), 6)
+        self.commands_table.setHorizontalHeaderLabels(
+            ["الغرض", "الأمر", "ماذا يفعل؟", "ماذا تتوقع؟", "المتطلبات والأثر", "نسخ"]
+        )
+        self.commands_table.setAlternatingRowColors(True)
+        self.commands_table.setWordWrap(True)
+        self.commands_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.commands_table.horizontalHeader().setStretchLastSection(True)
+        self.commands_table.setColumnWidth(1, 190)
+        self.commands_table.setColumnWidth(2, 260)
+        self.commands_table.setColumnWidth(3, 260)
+        for row, command in enumerate(SAFE_COMMANDS):
+            values = (
+                command.title,
+                command.command,
+                command.purpose,
+                command.expected,
+                f"{command.prerequisites}\n{command.impact}",
+            )
+            for column, value in enumerate(values):
+                self.commands_table.setItem(row, column, QTableWidgetItem(value))
+            copy_button = QPushButton("نسخ الأمر")
+            copy_button.clicked.connect(
+                lambda checked=False, text=command.command: self._copy_safe_command(text)
+            )
+            self.commands_table.setCellWidget(row, 5, copy_button)
+            self.commands_table.setRowHeight(row, 110)
+        layout.addWidget(self.commands_table, 1)
+        self.commands_status = _label("النسخ لا يعني التنفيذ؛ راجع الأمر يدوياً قبل تشغيله.", "Muted")
+        layout.addWidget(self.commands_status)
+        return page
+
+    def _copy_safe_command(self, command: str) -> None:
+        QApplication.clipboard().setText(command)
+        self.commands_status.setText(
+            f"تم نسخ الأمر: {command} — لم يتم تنفيذه."
+        )
+
     def _build_reports(self) -> QWidget:
         page, layout = _page_container()
         layout.addWidget(_label("مخرجات التقارير", "SectionTitle"))
@@ -554,6 +796,7 @@ class MainWindow(QMainWindow):
         self.metric_reports.findChild(QLabel, "Metric").setText(str(len(list_html_reports())))
         self._refresh_scope_table()
         self._refresh_sessions_table()
+        self._refresh_evidence_sessions()
         self._refresh_reports_table()
         self._refresh_diagnostics_table()
 
