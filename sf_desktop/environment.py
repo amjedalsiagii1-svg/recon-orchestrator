@@ -102,7 +102,10 @@ def parse_scope_lines(lines: list[str]) -> tuple[list[ScopeEntry], int]:
                 ipaddress.ip_address(value)
                 entries.append(ScopeEntry(value, "IP", True, "عنوان صحيح"))
         except ValueError:
-            if hostname_re.fullmatch(value):
+            # Numeric dotted strings are IP-shaped input, not hostnames.
+            if re.fullmatch(r"[0-9.]+", value):
+                entries.append(ScopeEntry(value, "IP", False, "عنوان IPv4 غير صالح"))
+            elif hostname_re.fullmatch(value):
                 entries.append(ScopeEntry(value, "اسم مضيف", True, "اسم مضيف بصيغة صحيحة"))
             else:
                 entries.append(ScopeEntry(value, "غير معروف", False, "صيغة غير صالحة"))
@@ -123,12 +126,17 @@ def read_scope_file(path: Path | None = None) -> tuple[list[ScopeEntry], str | N
 def list_html_reports(directory: Path | None = None) -> list[Path]:
     """List regular HTML report files only; do not parse or execute their content."""
     output_dir = directory or (PROJECT_ROOT / "reports" / "output")
+    found: list[tuple[float, Path]] = []
     try:
-        return sorted(
-            (item for item in output_dir.iterdir()
-             if item.is_file() and not item.is_symlink() and item.suffix.lower() == ".html"),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
+        for item in output_dir.iterdir():
+            try:
+                if item.is_symlink() or not item.is_file() or item.suffix.lower() != ".html":
+                    continue
+                found.append((item.stat().st_mtime, item))
+            except OSError:
+                # A report may be removed while the directory is being listed.
+                continue
     except OSError:
         return []
+    found.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _mtime, item in found]

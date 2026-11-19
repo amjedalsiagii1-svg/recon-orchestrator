@@ -16,5 +16,9 @@ def test_parse_scope_lines_accepts_ip_cidr_and_hostname():
 
 
 def test_parse_scope_lines_rejects_malformed_values():
-    entries, _ignored = parse_scope_lines(["300.300.300.300/99", "bad host"])
+    entries, _ignored = parse_scope_lines([
+        "300.300.300.300/99",
+        "300.300.300.300",
+        "bad host",
+    ])
     assert all(not entry.valid for entry in entries)
