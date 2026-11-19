@@ -84,5 +84,5 @@ def test_report_contains_explainable_guidance_and_safe_commands(tmp_path):
     assert "ip -br address" in content
     assert "ss -lntup" in content
     assert "ماذا يفعل؟" in content
-    assert "غير متحققة" not in content  # report labels are tied to recorded status only
+    assert "unverified" in content  # user-entered evidence remains explicitly unverified
     assert "لا تُعرض نتائج فحص لم تُنفذ" in content

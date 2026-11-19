@@ -192,7 +192,7 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
   <h2>أوامر تحقق محلية آمنة</h2>
   <p class="muted">الأوامر أدناه استعلامية على جهاز Kali المحلي. لا تنفذ فحصاً على هدف بعيد ولا تغيّر إعدادات النظام. اقرأ المتطلبات والنتيجة المتوقعة قبل تشغيل أي أمر يدوياً.</p>
   <table>
-    <thead><tr><th>الغرض</th><th>الأمر</th><th>وظيفته</th><th>النتيجة المتوقعة</th><th>المتطلبات والأثر</th></tr></thead>
+    <thead><tr><th>الغرض</th><th>الأمر</th><th>ماذا يفعل؟</th><th>النتيجة المتوقعة</th><th>المتطلبات والأثر</th></tr></thead>
     <tbody>{command_rows}</tbody>
   </table>
 </section>
