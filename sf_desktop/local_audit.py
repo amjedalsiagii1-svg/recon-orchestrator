@@ -117,7 +117,10 @@ def parse_ip_address_json(raw: str) -> tuple[list[dict[str, Any]], list[dict[str
             mac = None
         operstate = _safe_text(node.get("operstate"), 20) or "UNKNOWN"
         addresses: list[str] = []
-        for info in node.get("addr_info", [])[:64]:
+        address_info = node.get("addr_info", [])
+        if not isinstance(address_info, list):
+            address_info = []
+        for info in address_info[:64]:
             if not isinstance(info, dict):
                 continue
             local = info.get("local")

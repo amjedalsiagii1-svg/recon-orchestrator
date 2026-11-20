@@ -18,7 +18,7 @@ from sf_desktop.environment import PROJECT_ROOT
 from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.advisor import commands_for_report, recommendations_for_evidence, severity_counts
 
-REPORT_VERSION = "0.2"
+REPORT_VERSION = "0.3"
 MAX_REPORT_EVIDENCE = 5000
 
 
@@ -213,7 +213,7 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
 </section>
 <section class="panel">
   <h2>الخدمات والمنافذ</h2>
-  <p class="muted">الحالة والإصدار كما وردا في ملف المصدر، ولا يمثل ذلك تحققاً مستقلاً من قابلية الاستغلال.</p>
+  <p class="muted">الحالة والإصدار كما وردا في المصدر. في التحليل المحلي تعني listening/bound وجود مقبس محلي، ولا تثبت وحدها إمكانية الوصول من شبكة أخرى أو من الإنترنت.</p>
   <table>
     <thead><tr><th>الأصل</th><th>البروتوكول</th><th>المنفذ</th><th>الحالة</th><th>الخدمة</th><th>المنتج</th><th>الإصدار</th><th>المصدر</th></tr></thead>
     <tbody>{service_rows}</tbody>

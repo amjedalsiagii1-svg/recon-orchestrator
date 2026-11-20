@@ -1,5 +1,21 @@
 # Changelog
 
+## [SF Desktop 0.4.0] — 2026-11-20
+
+### Changed
+- Replaced the XML-first inventory page with a one-click local device analysis workflow.
+- XML imports remain an optional advanced capability and are no longer needed for normal use.
+
+### Added
+- Read-only local interface, private address, default route, DNS, and listening-socket snapshot.
+- Automatic session creation when starting the first local analysis.
+- Local snapshot provenance in SQLite and in the HTML report.
+- Clear warning that local listening sockets do not prove Internet reachability.
+
+### Safety
+- No active network discovery, packet transmission, remote target checks, or root privileges in quick analysis.
+
+
 ## [SF Desktop 0.3.0] — 2026-11-20
 
 ### Added

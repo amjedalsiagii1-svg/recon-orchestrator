@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
             side.addWidget(button)
 
         side.addStretch(1)
-        side.addWidget(_label("إصدار الواجهة 0.3.0", "BrandCaption"))
+        side.addWidget(_label("إصدار الواجهة 0.4.0", "BrandCaption"))
         side.addWidget(_label("وضع المعاينة المحلية", "BrandCaption"))
 
         content = QWidget()
@@ -746,6 +746,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.inventory_assets_table)
 
         layout.addWidget(_label("الخدمات التي تستمع على جهازك", "SectionTitle"))
+        layout.addWidget(_label(
+            "تنبيه: حالة «يستمع / مرتبط» تصف مقبساً محلياً على جهازك، "
+            "ولا تثبت وحدها إمكانية الوصول إليه من شبكة أخرى أو من الإنترنت.",
+            "Muted",
+        ))
         self.inventory_services_table = QTableWidget(0, 7)
         self.inventory_services_table.setHorizontalHeaderLabels(
             ["عنوان الجهاز", "البروتوكول", "المنفذ", "الحالة المحلية", "التعريف", "تفاصيل الربط", "المصدر"]
@@ -932,6 +937,12 @@ class MainWindow(QMainWindow):
             )
             self._refresh_inventory_tables()
             self._refresh_evidence_sessions()
+            self.inventory_context.setText(
+                f"الجهاز: {snapshot.hostname} | "
+                f"الواجهة: {snapshot.default_interface or 'غير معروفة'} | "
+                f"البوابة: {gateway_text} | DNS: {dns_text} | "
+                "النطاق: الجهاز الحالي فقط"
+            )
             if result["duplicate"]:
                 message = "لم تتغير بيانات اللقطة؛ كانت هذه النتائج محفوظة بالفعل."
             else:

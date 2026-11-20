@@ -367,9 +367,15 @@ class SFStore:
             if not isinstance(item, dict):
                 raise ValueError("بنية الأصل المستورد غير صالحة")
             try:
-                ip_value = str(ipaddress.ip_address(item.get("ip", "")))
+                parsed_ip = ipaddress.ip_address(item.get("ip", ""))
+                ip_value = str(parsed_ip)
             except ValueError as exc:
                 raise ValueError("يحتوي الاستيراد على عنوان IP غير صالح") from exc
+            if source_type == "local-readonly" and not (
+                parsed_ip.is_loopback or parsed_ip.is_link_local
+                or (parsed_ip.is_private and not parsed_ip.is_global)
+            ):
+                raise ValueError("التحليل المحلي لا يقبل إلا عناوين الجهاز المحلية أو الخاصة")
             mac = optional_text(item.get("mac"), "MAC", 17)
             if mac and not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac):
                 raise ValueError("عنوان MAC غير صالح")
