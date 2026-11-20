@@ -55,3 +55,50 @@ def test_reject_payload_over_limit(tmp_path):
             session["id"], source="x", category="x", title="x",
             detail="x", confidence=0.5, payload={"large": "z" * 70000},
         )
+
+def test_inventory_import_is_scoped_deduplicated_and_queryable(tmp_path):
+    import hashlib
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("جلسة أصول")
+    assets = [{
+        "ip": "192.168.8.10", "hostname": "device.local",
+        "mac": "aa:bb:cc:dd:ee:ff", "vendor": "Example", "state": "up",
+    }]
+    services = [{
+        "ip": "192.168.8.10", "protocol": "tcp", "port": 22,
+        "state": "open", "name": "ssh", "product": "OpenSSH",
+        "version": "9.2", "extra_info": None,
+    }]
+    digest = hashlib.sha256(b"source").hexdigest()
+    result = store.import_inventory(
+        session["id"], source_name="sample.xml", sha256=digest,
+        assets=assets, services=services, skipped_host_count=1,
+    )
+    assert result["duplicate"] is False
+    assert len(store.list_assets(session["id"])) == 1
+    assert len(store.list_services(session["id"])) == 1
+    assert store.list_services(session["id"])[0]["port"] == 22
+
+    duplicate = store.import_inventory(
+        session["id"], source_name="renamed.xml", sha256=digest,
+        assets=assets, services=services,
+    )
+    assert duplicate["duplicate"] is True
+    assert len(store.list_assets(session["id"])) == 1
+    assert len(store.list_imports(session["id"])) == 1
+
+
+def test_inventory_rejects_closed_session_and_invalid_data(tmp_path):
+    import hashlib
+    import pytest
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("مغلقة")
+    store.close_session(session["id"])
+    digest = hashlib.sha256(b"x").hexdigest()
+    with pytest.raises(StoreError, match="مغلقة"):
+        store.import_inventory(
+            session["id"], source_name="x.xml", sha256=digest,
+            assets=[{"ip": "192.168.8.10"}], services=[],
+        )

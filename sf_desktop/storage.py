@@ -99,6 +99,59 @@ class SFStore:
                     ON sessions(updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_sf_evidence_session
                     ON evidence(session_id, id);
+                CREATE TABLE IF NOT EXISTS imports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    imported_at TEXT NOT NULL,
+                    asset_count INTEGER NOT NULL,
+                    service_count INTEGER NOT NULL,
+                    skipped_host_count INTEGER NOT NULL,
+                    UNIQUE(session_id, sha256),
+                    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS assets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    hostname TEXT,
+                    mac TEXT,
+                    vendor TEXT,
+                    state TEXT NOT NULL DEFAULT 'up',
+                    source_import_id INTEGER NOT NULL,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    UNIQUE(session_id, ip),
+                    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+                    FOREIGN KEY(source_import_id) REFERENCES imports(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS services (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    asset_id INTEGER NOT NULL,
+                    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+                    port INTEGER NOT NULL CHECK(port BETWEEN 1 AND 65535),
+                    state TEXT NOT NULL,
+                    name TEXT,
+                    product TEXT,
+                    version TEXT,
+                    extra_info TEXT,
+                    source_import_id INTEGER NOT NULL,
+                    first_seen TEXT NOT NULL,
+                    last_seen TEXT NOT NULL,
+                    UNIQUE(asset_id, protocol, port),
+                    FOREIGN KEY(asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+                    FOREIGN KEY(source_import_id) REFERENCES imports(id)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_sf_imports_session
+                    ON imports(session_id, imported_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_sf_assets_session
+                    ON assets(session_id, ip);
+                CREATE INDEX IF NOT EXISTS idx_sf_services_asset
+                    ON services(asset_id, protocol, port);
                 """
             )
         if os.name == "posix" and self.path.exists():
@@ -236,6 +289,252 @@ class SFStore:
             raise StoreError("الجلسة غير موجودة أو لا يمكن ربط الدليل بها") from exc
         except sqlite3.Error as exc:
             raise StoreError(f"تعذر حفظ الدليل: {exc}") from exc
+
+    def import_inventory(
+        self,
+        session_id: str,
+        *,
+        source_name: str,
+        sha256: str,
+        assets: list[dict[str, Any]],
+        services: list[dict[str, Any]],
+        skipped_host_count: int = 0,
+    ) -> dict[str, Any]:
+        """Atomically import already-collected, scope-validated inventory."""
+        import ipaddress
+        import re
+
+        clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
+        clean_source = self._clean_text(Path(source_name).name, "اسم المصدر", 200)
+        digest = (sha256 or "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ValueError("بصمة SHA-256 غير صالحة")
+        if not isinstance(assets, list) or not assets or len(assets) > 256:
+            raise ValueError("يجب أن يحتوي الاستيراد على أصل واحد على الأقل وبحد أقصى 256 أصلاً")
+        if not isinstance(services, list) or len(services) > 5000:
+            raise ValueError("عدد الخدمات يتجاوز الحد المسموح (5000)")
+        if isinstance(skipped_host_count, bool) or not isinstance(skipped_host_count, int) or skipped_host_count < 0:
+            raise ValueError("عدد الأجهزة المستبعدة غير صالح")
+
+        def optional_text(value: Any, field: str, maximum: int) -> str | None:
+            if value is None or value == "":
+                return None
+            if not isinstance(value, str):
+                raise ValueError(f"{field}: يجب أن تكون القيمة نصاً")
+            clean = value.strip()
+            if len(clean) > maximum:
+                raise ValueError(f"{field}: تجاوز الحد الأقصى ({maximum} حرفاً)")
+            if any(ord(ch) < 32 for ch in clean):
+                raise ValueError(f"{field}: يحتوي محارف تحكم غير مسموحة")
+            return clean or None
+
+        normalized_assets: dict[str, dict[str, Any]] = {}
+        for item in assets:
+            if not isinstance(item, dict):
+                raise ValueError("بنية الأصل المستورد غير صالحة")
+            try:
+                ip_value = str(ipaddress.ip_address(item.get("ip", "")))
+            except ValueError as exc:
+                raise ValueError("يحتوي الاستيراد على عنوان IP غير صالح") from exc
+            mac = optional_text(item.get("mac"), "MAC", 17)
+            if mac and not re.fullmatch(r"(?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}", mac):
+                raise ValueError("عنوان MAC غير صالح")
+            state = optional_text(item.get("state", "up"), "حالة الأصل", 20) or "unknown"
+            if state not in {"up", "down", "unknown"}:
+                raise ValueError("حالة الأصل غير مدعومة")
+            normalized_assets[ip_value] = {
+                "ip": ip_value,
+                "hostname": optional_text(item.get("hostname"), "اسم المضيف", 253),
+                "mac": mac.lower() if mac else None,
+                "vendor": optional_text(item.get("vendor"), "الشركة المصنّعة", 120),
+                "state": state,
+            }
+        if len(normalized_assets) != len(assets):
+            # Multiple rows for the same address are ambiguous; reject rather than silently overwrite.
+            raise ValueError("يتكرر عنوان IP داخل قائمة الأصول")
+
+        normalized_services: list[dict[str, Any]] = []
+        seen_services: set[tuple[str, str, int]] = set()
+        allowed_states = {"open", "closed", "filtered", "open|filtered", "unfiltered", "unknown"}
+        for item in services:
+            if not isinstance(item, dict):
+                raise ValueError("بنية الخدمة المستوردة غير صالحة")
+            try:
+                ip_value = str(ipaddress.ip_address(item.get("ip", "")))
+            except ValueError as exc:
+                raise ValueError("تحتوي خدمة مستوردة على عنوان IP غير صالح") from exc
+            if ip_value not in normalized_assets:
+                raise ValueError("الخدمة مرتبطة بأصل غير موجود في ملف الاستيراد")
+            protocol = str(item.get("protocol", "")).lower()
+            if protocol not in {"tcp", "udp"}:
+                raise ValueError("بروتوكول الخدمة يجب أن يكون TCP أو UDP")
+            port = item.get("port")
+            if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+                raise ValueError("رقم منفذ الخدمة غير صالح")
+            state = optional_text(item.get("state", "unknown"), "حالة المنفذ", 24) or "unknown"
+            if state not in allowed_states:
+                raise ValueError("حالة المنفذ غير مدعومة")
+            key = (ip_value, protocol, port)
+            if key in seen_services:
+                raise ValueError("تتكرر خدمة على نفس الأصل والبروتوكول والمنفذ")
+            seen_services.add(key)
+            normalized_services.append({
+                "ip": ip_value,
+                "protocol": protocol,
+                "port": port,
+                "state": state,
+                "name": optional_text(item.get("name"), "اسم الخدمة", 120),
+                "product": optional_text(item.get("product"), "المنتج", 160),
+                "version": optional_text(item.get("version"), "الإصدار", 120),
+                "extra_info": optional_text(item.get("extra_info"), "معلومات إضافية", 500),
+            })
+
+        now = _now()
+        try:
+            with self._connect() as connection:
+                session = connection.execute(
+                    "SELECT status FROM sessions WHERE id=?", (clean_id,)
+                ).fetchone()
+                if session is None:
+                    raise StoreError("الجلسة المطلوبة غير موجودة")
+                if session["status"] != "open":
+                    raise StoreError("لا يمكن استيراد بيانات إلى جلسة مغلقة")
+
+                duplicate = connection.execute(
+                    "SELECT id, asset_count, service_count, skipped_host_count "
+                    "FROM imports WHERE session_id=? AND sha256=?",
+                    (clean_id, digest),
+                ).fetchone()
+                if duplicate:
+                    return {
+                        "duplicate": True,
+                        "import_id": int(duplicate["id"]),
+                        "asset_count": int(duplicate["asset_count"]),
+                        "service_count": int(duplicate["service_count"]),
+                        "skipped_host_count": int(duplicate["skipped_host_count"]),
+                        "source_name": clean_source,
+                    }
+
+                cursor = connection.execute(
+                    "INSERT INTO imports(session_id, source_name, sha256, imported_at, "
+                    "asset_count, service_count, skipped_host_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (clean_id, clean_source, digest, now, len(normalized_assets),
+                     len(normalized_services), skipped_host_count),
+                )
+                import_id = int(cursor.lastrowid)
+                asset_ids: dict[str, int] = {}
+                for ip_value, item in normalized_assets.items():
+                    existing = connection.execute(
+                        "SELECT id, first_seen FROM assets WHERE session_id=? AND ip=?",
+                        (clean_id, ip_value),
+                    ).fetchone()
+                    if existing:
+                        asset_id = int(existing["id"])
+                        connection.execute(
+                            "UPDATE assets SET hostname=COALESCE(?, hostname), "
+                            "mac=COALESCE(?, mac), vendor=COALESCE(?, vendor), "
+                            "state=?, source_import_id=?, last_seen=? WHERE id=?",
+                            (item["hostname"], item["mac"], item["vendor"], item["state"],
+                             import_id, now, asset_id),
+                        )
+                    else:
+                        asset_cursor = connection.execute(
+                            "INSERT INTO assets(session_id, ip, hostname, mac, vendor, state, "
+                            "source_import_id, first_seen, last_seen) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (clean_id, ip_value, item["hostname"], item["mac"],
+                             item["vendor"], item["state"], import_id, now, now),
+                        )
+                        asset_id = int(asset_cursor.lastrowid)
+                    asset_ids[ip_value] = asset_id
+
+                for item in normalized_services:
+                    asset_id = asset_ids[item["ip"]]
+                    existing = connection.execute(
+                        "SELECT id FROM services WHERE asset_id=? AND protocol=? AND port=?",
+                        (asset_id, item["protocol"], item["port"]),
+                    ).fetchone()
+                    if existing:
+                        connection.execute(
+                            "UPDATE services SET state=?, name=COALESCE(?, name), "
+                            "product=COALESCE(?, product), version=COALESCE(?, version), "
+                            "extra_info=COALESCE(?, extra_info), source_import_id=?, last_seen=? "
+                            "WHERE id=?",
+                            (item["state"], item["name"], item["product"], item["version"],
+                             item["extra_info"], import_id, now, int(existing["id"])),
+                        )
+                    else:
+                        connection.execute(
+                            "INSERT INTO services(asset_id, protocol, port, state, name, "
+                            "product, version, extra_info, source_import_id, first_seen, last_seen) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (asset_id, item["protocol"], item["port"], item["state"],
+                             item["name"], item["product"], item["version"],
+                             item["extra_info"], import_id, now, now),
+                        )
+                connection.execute(
+                    "UPDATE sessions SET updated_at=? WHERE id=?", (now, clean_id)
+                )
+            return {
+                "duplicate": False,
+                "import_id": import_id,
+                "asset_count": len(normalized_assets),
+                "service_count": len(normalized_services),
+                "skipped_host_count": skipped_host_count,
+                "source_name": clean_source,
+            }
+        except sqlite3.IntegrityError as exc:
+            raise StoreError(f"تعارض في بيانات الأصول والخدمات: {exc}") from exc
+        except sqlite3.Error as exc:
+            raise StoreError(f"تعذر حفظ الاستيراد: {exc}") from exc
+
+    def list_assets(self, session_id: str) -> list[dict[str, Any]]:
+        clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT a.id, a.session_id, a.ip, a.hostname, a.mac, a.vendor, "
+                    "a.state, a.first_seen, a.last_seen, i.source_name, "
+                    "(SELECT COUNT(*) FROM services s WHERE s.asset_id=a.id) AS service_count "
+                    "FROM assets a JOIN imports i ON i.id=a.source_import_id "
+                    "WHERE a.session_id=? ORDER BY a.ip",
+                    (clean_id,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise StoreError(f"تعذر قراءة سجل الأصول: {exc}") from exc
+
+    def list_services(self, session_id: str) -> list[dict[str, Any]]:
+        clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT s.id, a.ip, a.hostname, s.protocol, s.port, s.state, "
+                    "s.name, s.product, s.version, s.extra_info, s.first_seen, "
+                    "s.last_seen, i.source_name "
+                    "FROM services s JOIN assets a ON a.id=s.asset_id "
+                    "JOIN imports i ON i.id=s.source_import_id "
+                    "WHERE a.session_id=? ORDER BY a.ip, s.protocol, s.port",
+                    (clean_id,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise StoreError(f"تعذر قراءة سجل الخدمات: {exc}") from exc
+
+    def list_imports(self, session_id: str) -> list[dict[str, Any]]:
+        clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
+        try:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT id, source_name, sha256, imported_at, asset_count, "
+                    "service_count, skipped_host_count FROM imports "
+                    "WHERE session_id=? ORDER BY imported_at DESC",
+                    (clean_id,),
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise StoreError(f"تعذر قراءة سجل الاستيرادات: {exc}") from exc
 
     def list_evidence(self, session_id: str) -> list[dict[str, Any]]:
         clean_id = self._clean_text(session_id, "معرّف الجلسة", 32)
