@@ -122,3 +122,24 @@ def test_report_includes_imported_assets_services_and_provenance(tmp_path):
     assert "inventory.xml" in content
     assert "Web" in content
     assert "سجل ملفات الاستيراد" in content
+
+
+
+def test_report_marks_local_snapshot_as_local_not_file_import(tmp_path):
+    import hashlib
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("تحليل الجهاز")
+    store.import_inventory(
+        session["id"],
+        source_name="قراءة محلية لجهاز Kali",
+        source_type="local-readonly",
+        sha256=hashlib.sha256(b"snapshot").hexdigest(),
+        assets=[{"ip": "192.168.8.30", "hostname": "kali", "state": "up"}],
+        services=[],
+        authorization_confirmed=False,
+    )
+    report = generate_session_report(store, session["id"], tmp_path / "out")
+    content = report.read_text(encoding="utf-8")
+    assert "تحليل محلي" in content
+    assert "لا ينطبق؛ جهازك المحلي" in content

@@ -28,8 +28,8 @@ def test_window_builds_arabic_pages_and_command_catalog(qapp, tmp_path, monkeypa
         assert window.commands_table.rowCount() == len(SAFE_COMMANDS)
         assert window.sessions_table.columnCount() == 4
         assert window.evidence_table.columnCount() == 7
-        assert window.inventory_assets_table.columnCount() == 7
-        assert window.inventory_services_table.columnCount() == 8
+        assert window.inventory_assets_table.columnCount() == 6
+        assert window.inventory_services_table.columnCount() == 7
         assert window.store is not None
     finally:
         window.close()
@@ -109,5 +109,70 @@ def test_inventory_view_lists_imported_assets_and_services(qapp, tmp_path, monke
         assert window.inventory_services_table.rowCount() == 1
         assert window.inventory_assets_table.item(0, 0).text() == "192.168.8.15"
         assert window.inventory_services_table.item(0, 2).text() == "443"
+    finally:
+        window.close()
+
+
+
+def test_one_click_local_audit_creates_session_and_saves_snapshot(qapp, tmp_path, monkeypatch):
+    from sf_desktop.local_audit import LocalAuditSnapshot
+    from sf_desktop import window as window_module
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-quick-audit"))
+    snapshot = LocalAuditSnapshot(
+        collected_at="2026-11-20T00:00:00+00:00",
+        hostname="kali-test",
+        interfaces=({
+            "name": "eth0",
+            "state": "UP",
+            "mac": "aa:bb:cc:dd:ee:20",
+            "addresses": ["192.168.8.20"],
+        },),
+        assets=({
+            "ip": "192.168.8.20",
+            "hostname": "kali-test",
+            "mac": "aa:bb:cc:dd:ee:20",
+            "vendor": None,
+            "state": "up",
+        },),
+        services=({
+            "ip": "192.168.8.20",
+            "protocol": "tcp",
+            "port": 631,
+            "state": "listening",
+            "name": "مستمع TCP محلي",
+            "product": None,
+            "version": None,
+            "extra_info": "عنوان الربط المحلي: 127.0.0.1",
+        },),
+        default_gateway="192.168.8.1",
+        default_interface="eth0",
+        dns_servers=("192.168.8.1",),
+        warnings=(),
+    )
+    monkeypatch.setattr(window_module, "collect_local_snapshot", lambda: snapshot)
+    monkeypatch.setattr(
+        window_module.QMessageBox,
+        "information",
+        lambda *args, **kwargs: window_module.QMessageBox.StandardButton.Ok,
+    )
+
+    window = MainWindow()
+    try:
+        assert window.inventory_session_combo.count() == 0
+        window._run_local_audit()
+        assert window.inventory_session_combo.count() == 1
+        session_id = window.inventory_session_combo.currentData()
+        assert session_id
+        assert window.inventory_assets_table.rowCount() == 1
+        assert window.inventory_services_table.rowCount() == 1
+        assert window.inventory_assets_table.item(0, 0).text() == "192.168.8.20"
+        assert window.inventory_services_table.item(0, 2).text() == "631"
+        assert "192.168.8.1" in window.inventory_status.text()
+        imports = window.store.list_imports(session_id)
+        assert imports[0]["source_type"] == "local-readonly"
+        assert imports[0]["authorization_confirmed"] == 0
+        evidence = window.store.list_evidence(session_id)
+        assert any(item["source"] == "local-readonly" for item in evidence)
     finally:
         window.close()

@@ -121,3 +121,55 @@ def test_inventory_import_requires_explicit_authorization_confirmation(tmp_path)
             assets=[{"ip": "192.168.8.10"}],
             services=[],
         )
+
+
+
+def test_local_readonly_snapshot_does_not_require_network_authorization(tmp_path):
+    import hashlib
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("تحليل محلي")
+    result = store.import_inventory(
+        session["id"],
+        source_name="قراءة محلية لجهاز Kali",
+        source_type="local-readonly",
+        sha256=hashlib.sha256(b"local-snapshot").hexdigest(),
+        assets=[{
+            "ip": "192.168.8.20",
+            "hostname": "kali",
+            "mac": "aa:bb:cc:dd:ee:20",
+            "state": "up",
+        }],
+        services=[{
+            "ip": "192.168.8.20",
+            "protocol": "tcp",
+            "port": 631,
+            "state": "listening",
+            "name": "مستمع TCP محلي",
+            "extra_info": "127.0.0.1",
+        }],
+        authorization_confirmed=False,
+    )
+    assert result["source_type"] == "local-readonly"
+    assert result["authorization_confirmed"] is False
+    assert store.list_assets(session["id"])[0]["source_type"] == "local-readonly"
+    assert store.list_services(session["id"])[0]["state"] == "listening"
+    assert store.list_imports(session["id"])[0]["source_type"] == "local-readonly"
+
+
+def test_local_snapshot_rejects_network_authorization_flag(tmp_path):
+    import hashlib
+    import pytest
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("مصدر محلي")
+    with pytest.raises(ValueError, match="لا يستخدم تأكيد تفويض شبكة"):
+        store.import_inventory(
+            session["id"],
+            source_name="قراءة محلية",
+            source_type="local-readonly",
+            sha256=hashlib.sha256(b"local").hexdigest(),
+            assets=[{"ip": "127.0.0.1"}],
+            services=[],
+            authorization_confirmed=True,
+        )
