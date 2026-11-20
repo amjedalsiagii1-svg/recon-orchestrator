@@ -30,7 +30,13 @@ def _e(value: Any) -> str:
     return html.escape(str(value if value is not None else "—"), quote=True)
 
 
-def _render(session: dict[str, str], evidence: list[dict[str, Any]]) -> str:
+def _render(
+    session: dict[str, str],
+    evidence: list[dict[str, Any]],
+    assets: list[dict[str, Any]],
+    services: list[dict[str, Any]],
+    imports: list[dict[str, Any]],
+) -> str:
     rows: list[str] = []
     for index, item in enumerate(evidence, start=1):
         confidence = float(item.get("confidence", 0.0))
@@ -65,6 +71,33 @@ def _render(session: dict[str, str], evidence: list[dict[str, Any]]) -> str:
     )
     created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     status = "جلسة مفتوحة" if session.get("status") == "open" else "جلسة مغلقة"
+    asset_rows = "".join(
+        "<tr>"
+        f"<td>{_e(item.get('ip'))}</td><td>{_e(item.get('hostname'))}</td>"
+        f"<td>{_e(item.get('mac'))}</td><td>{_e(item.get('vendor'))}</td>"
+        f"<td>{_e(item.get('state'))}</td><td>{_e(item.get('service_count'))}</td>"
+        f"<td>{_e(item.get('source_name'))}</td></tr>"
+        for item in assets
+    ) or "<tr><td colspan='7' class='empty'>لا توجد أصول مستوردة في هذه الجلسة.</td></tr>"
+
+    service_rows = "".join(
+        "<tr>"
+        f"<td>{_e(item.get('ip'))}</td><td>{_e(item.get('protocol'))}</td>"
+        f"<td>{_e(item.get('port'))}</td><td>{_e(item.get('state'))}</td>"
+        f"<td>{_e(item.get('name'))}</td><td>{_e(item.get('product'))}</td>"
+        f"<td>{_e(item.get('version'))}</td><td>{_e(item.get('source_name'))}</td></tr>"
+        for item in services
+    ) or "<tr><td colspan='8' class='empty'>لا توجد خدمات مستوردة في هذه الجلسة.</td></tr>"
+
+    import_rows = "".join(
+        "<tr>"
+        f"<td>{_e(item.get('source_name'))}</td><td>{_e(item.get('imported_at'))}</td>"
+        f"<td>{_e(item.get('asset_count'))}</td><td>{_e(item.get('service_count'))}</td>"
+        f"<td>{_e(item.get('skipped_host_count'))}</td>"
+        f"<td><code>{_e(item.get('sha256'))}</code></td></tr>"
+        for item in imports
+    ) or "<tr><td colspan='6' class='empty'>لا توجد ملفات نتائج مستوردة.</td></tr>"
+
     severity = severity_counts(evidence)
     severity_labels = {
         "critical": "حرج",
@@ -160,10 +193,35 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
     <div class="metric"><span class="muted">معرّف الجلسة</span><strong>{_e(session.get('id'))}</strong></div>
     <div class="metric"><span class="muted">الحالة</span><strong>{_e(status)}</strong></div>
     <div class="metric"><span class="muted">عدد الأدلة المسجلة</span><strong>{len(evidence)}</strong></div>
+    <div class="metric"><span class="muted">الأصول</span><strong>{len(assets)}</strong></div>
+    <div class="metric"><span class="muted">الخدمات</span><strong>{len(services)}</strong></div>
   </div>
   <p class="muted">تاريخ الإنشاء: {_e(session.get('created_at'))}</p>
   <p class="muted">آخر تحديث: {_e(session.get('updated_at'))}</p>
   <p class="muted">وقت إنشاء التقرير: {_e(created)}</p>
+</section>
+<section class="panel">
+  <h2>الأصول والأجهزة</h2>
+  <p class="muted">بيانات مستوردة من ملفات محلية محفوظة، بعد قبول العناوين الواقعة داخل النطاق الحالي فقط.</p>
+  <table>
+    <thead><tr><th>IP</th><th>اسم المضيف</th><th>MAC</th><th>الشركة</th><th>الحالة</th><th>الخدمات</th><th>المصدر</th></tr></thead>
+    <tbody>{asset_rows}</tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2>الخدمات والمنافذ</h2>
+  <p class="muted">الحالة والإصدار كما وردا في ملف المصدر، ولا يمثل ذلك تحققاً مستقلاً من قابلية الاستغلال.</p>
+  <table>
+    <thead><tr><th>الأصل</th><th>البروتوكول</th><th>المنفذ</th><th>الحالة</th><th>الخدمة</th><th>المنتج</th><th>الإصدار</th><th>المصدر</th></tr></thead>
+    <tbody>{service_rows}</tbody>
+  </table>
+</section>
+<section class="panel">
+  <h2>سجل ملفات الاستيراد</h2>
+  <table>
+    <thead><tr><th>الملف</th><th>تاريخ الاستيراد</th><th>الأصول في الملف</th><th>الخدمات في الملف</th><th>الأجهزة المستبعدة</th><th>SHA-256</th></tr></thead>
+    <tbody>{import_rows}</tbody>
+  </table>
 </section>
 <section class="panel">
   <h2>ملخص درجات الخطورة المدخلة</h2>
@@ -223,6 +281,9 @@ def generate_session_report(
         if session is None:
             raise ReportError("الجلسة المطلوبة غير موجودة")
         evidence = store.list_evidence(session_id)
+        assets = store.list_assets(session_id)
+        services = store.list_services(session_id)
+        imports = store.list_imports(session_id)
     except StoreError as exc:
         raise ReportError(str(exc)) from exc
 
@@ -230,6 +291,8 @@ def generate_session_report(
         raise ReportError(
             f"عدد الأدلة يتجاوز الحد الآمن للتقرير ({MAX_REPORT_EVIDENCE})"
         )
+    if len(assets) > 256 or len(services) > 5000 or len(imports) > 100:
+        raise ReportError("حجم سجل الأصول أو الخدمات أو الاستيرادات يتجاوز الحد الآمن للتقرير")
 
     destination = Path(output_dir) if output_dir is not None else (
         PROJECT_ROOT / "reports" / "output"
@@ -259,7 +322,7 @@ def generate_session_report(
         )
         temporary_path = Path(temp_name)
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(_render(session, evidence))
+            handle.write(_render(session, evidence, assets, services, imports))
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, final_path)

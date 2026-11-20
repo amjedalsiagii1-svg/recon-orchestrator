@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -25,7 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sf_desktop.scope_guard import validate_scope_entry
+from sf_desktop.scope_guard import ScopePolicy, validate_scope_entry
+from sf_desktop.nmap_xml import NmapImportError, parse_nmap_xml_file
 from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.reporting import ReportError, generate_session_report
 from sf_desktop.advisor import SAFE_COMMANDS, SEVERITY_LABELS, recommendations_for_evidence
@@ -157,9 +159,10 @@ class MainWindow(QMainWindow):
         ("النطاق المصرح", 2),
         ("الجلسات", 3),
         ("الأدلة والنتائج", 4),
-        ("الأوامر والإرشادات", 5),
-        ("التقارير", 6),
-        ("تشخيص النظام", 7),
+        ("الأصول والخدمات", 5),
+        ("الأوامر والإرشادات", 6),
+        ("التقارير", 7),
+        ("تشخيص النظام", 8),
     ]
 
     def __init__(self) -> None:
@@ -182,6 +185,7 @@ class MainWindow(QMainWindow):
             ("النطاق المصرح", "فحص سياسة النطاق المحلية دون اتصال بالأهداف"),
             ("الجلسات", "إنشاء جلسات محلية وحفظ سجل العمل"),
             ("الأدلة والنتائج", "تجميع السجلات ومراجعتها دون اختلاق استنتاجات"),
+            ("الأصول والخدمات", "استيراد بيانات XML الموجودة والتحقق من انتمائها إلى النطاق"),
             ("الأوامر والإرشادات", "أوامر محلية مع شرحها ومتطلباتها ونتائجها المتوقعة"),
             ("التقارير", "عرض ملفات HTML الموجودة دون فتح أو تعديل محتواها"),
             ("تشخيص النظام", "معلومات محلية عن النظام والاعتماديات المتاحة"),
@@ -252,6 +256,7 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._build_scope())
         self.stack.addWidget(self._build_sessions())
         self.stack.addWidget(self._build_evidence())
+        self.stack.addWidget(self._build_inventory())
         self.stack.addWidget(self._build_commands())
         self.stack.addWidget(self._build_reports())
         self.stack.addWidget(self._build_diagnostics())
@@ -426,6 +431,7 @@ class MainWindow(QMainWindow):
             record = self.store.create_session(name)
             self._refresh_sessions_table()
             self._refresh_evidence_sessions()
+            self._refresh_inventory_sessions()
             self.sessions_status.setText(
                 f"تم إنشاء الجلسة المحلية: {record['id']}"
             )
@@ -687,6 +693,186 @@ class MainWindow(QMainWindow):
         except (ValueError, StoreError, OSError) as exc:
             QMessageBox.warning(self, "تعذر حفظ الدليل", str(exc))
 
+    def _build_inventory(self) -> QWidget:
+        page, layout = _page_container()
+        header = QHBoxLayout()
+        header.addWidget(_label("سجل الأصول والخدمات", "SectionTitle"))
+        header.addStretch(1)
+        self.inventory_session_combo = QComboBox()
+        self.inventory_session_combo.setMinimumWidth(260)
+        self.inventory_session_combo.currentIndexChanged.connect(
+            self._refresh_inventory_tables
+        )
+        header.addWidget(self.inventory_session_combo)
+        import_button = QPushButton("استيراد Nmap XML محفوظ")
+        import_button.setObjectName("ActionButton")
+        import_button.clicked.connect(self._import_nmap_xml)
+        header.addWidget(import_button)
+        refresh_button = QPushButton("تحديث")
+        refresh_button.clicked.connect(self._refresh_inventory_sessions)
+        header.addWidget(refresh_button)
+        layout.addLayout(header)
+        layout.addWidget(_label(
+            "يستورد SF نتائج XML الموجودة مسبقاً فقط. لا يشغّل Nmap ولا يرسل أي حزم. "
+            "تُقبل العناوين الموجودة داخل النطاق المحلي المهيأ في config/scope.txt فقط.",
+            "Muted",
+        ))
+
+        self.inventory_assets_table = QTableWidget(0, 7)
+        self.inventory_assets_table.setHorizontalHeaderLabels(
+            ["عنوان IP", "اسم المضيف", "MAC", "الشركة", "الحالة", "الخدمات", "مصدر البيانات"]
+        )
+        self.inventory_assets_table.setAlternatingRowColors(True)
+        self.inventory_assets_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.inventory_assets_table.horizontalHeader().setStretchLastSection(True)
+        self.inventory_assets_table.setMaximumHeight(250)
+        layout.addWidget(_label("الأجهزة والأصول", "SectionTitle"))
+        layout.addWidget(self.inventory_assets_table)
+
+        layout.addWidget(_label("الخدمات والمنافذ المسجلة", "SectionTitle"))
+        self.inventory_services_table = QTableWidget(0, 8)
+        self.inventory_services_table.setHorizontalHeaderLabels(
+            ["الأصل", "البروتوكول", "المنفذ", "الحالة", "الخدمة", "المنتج", "الإصدار", "المصدر"]
+        )
+        self.inventory_services_table.setAlternatingRowColors(True)
+        self.inventory_services_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.inventory_services_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.inventory_services_table, 1)
+
+        self.inventory_status = _label("", "Muted")
+        layout.addWidget(self.inventory_status)
+        return page
+
+    def _refresh_inventory_sessions(self) -> None:
+        if not hasattr(self, "inventory_session_combo"):
+            return
+        combo = self.inventory_session_combo
+        current_id = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        if self.store is not None:
+            try:
+                for session in self.store.list_sessions(limit=100):
+                    combo.addItem(
+                        f"{session['name']} · {session['id'][:8]}",
+                        session["id"],
+                    )
+            except (StoreError, OSError) as exc:
+                self.inventory_status.setText(f"تعذر تحميل الجلسات: {exc}")
+        if current_id:
+            index = combo.findData(current_id)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        combo.blockSignals(False)
+        self._refresh_inventory_tables()
+
+    def _refresh_inventory_tables(self, *_args) -> None:
+        if not hasattr(self, "inventory_assets_table"):
+            return
+        self.inventory_assets_table.setRowCount(0)
+        self.inventory_services_table.setRowCount(0)
+        session_id = self.inventory_session_combo.currentData()
+        if not session_id or self.store is None:
+            self.inventory_status.setText("أنشئ جلسة أولاً، ثم استورد ملف نتائج محلياً.")
+            return
+        try:
+            assets = self.store.list_assets(session_id)
+            services = self.store.list_services(session_id)
+        except (StoreError, OSError) as exc:
+            self.inventory_status.setText(f"تعذر قراءة سجل الأصول والخدمات: {exc}")
+            return
+
+        for asset in assets:
+            row = self.inventory_assets_table.rowCount()
+            self.inventory_assets_table.insertRow(row)
+            values = (
+                asset["ip"], asset["hostname"] or "—", asset["mac"] or "—",
+                asset["vendor"] or "—", asset["state"], str(asset["service_count"]),
+                asset["source_name"],
+            )
+            for column, value in enumerate(values):
+                self.inventory_assets_table.setItem(row, column, QTableWidgetItem(str(value)))
+
+        for service in services:
+            row = self.inventory_services_table.rowCount()
+            self.inventory_services_table.insertRow(row)
+            values = (
+                service["ip"], service["protocol"], str(service["port"]),
+                service["state"], service["name"] or "—",
+                service["product"] or "—", service["version"] or "—",
+                service["source_name"],
+            )
+            for column, value in enumerate(values):
+                self.inventory_services_table.setItem(row, column, QTableWidgetItem(str(value)))
+
+        imports = self.store.list_imports(session_id)
+        imported_hosts = sum(item["asset_count"] for item in imports)
+        self.inventory_status.setText(
+            f"الأصول الحالية: {len(assets)} | الخدمات الحالية: {len(services)} | "
+            f"عمليات الاستيراد: {len(imports)} | سجلات الأجهزة عبر الملفات: {imported_hosts}"
+        )
+
+    def _import_nmap_xml(self) -> None:
+        if self.store is None:
+            QMessageBox.warning(self, "التخزين غير متاح", self._storage_error or "تعذر فتح قاعدة البيانات.")
+            return
+        session_id = self.inventory_session_combo.currentData()
+        if not session_id:
+            QMessageBox.information(self, "اختر جلسة", "أنشئ جلسة أو حدد جلسة مفتوحة أولاً.")
+            return
+        try:
+            session = self.store.get_session(session_id)
+            if session is None or session["status"] != "open":
+                raise StoreError("لا يمكن الاستيراد إلى جلسة غير موجودة أو مغلقة.")
+        except (StoreError, OSError) as exc:
+            QMessageBox.warning(self, "الجلسة غير متاحة", str(exc))
+            return
+
+        scope_values = [entry.value for entry in self._scope_entries if entry.valid]
+        policy = ScopePolicy.from_values(scope_values)
+        if not policy.networks:
+            QMessageBox.warning(
+                self, "النطاق غير مهيأ",
+                "لا توجد عناوين محلية مقبولة في config/scope.txt. "
+                "أضف نطاقاً تملكه أو لديك تفويض صريح لتقييمه، ثم أعد المحاولة.",
+            )
+            return
+
+        filename, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "استيراد نتائج Nmap XML محفوظة",
+            str(PROJECT_ROOT),
+            "Nmap XML (*.xml);;XML files (*.xml);;All files (*)",
+        )
+        if not filename:
+            return
+        try:
+            parsed = parse_nmap_xml_file(filename, scope=policy)
+            result = self.store.import_inventory(
+                session_id,
+                source_name=parsed.source_name,
+                sha256=parsed.sha256,
+                assets=parsed.asset_dicts(),
+                services=parsed.service_dicts(),
+                skipped_host_count=parsed.skipped_host_count,
+            )
+            self._refresh_inventory_tables()
+            if result["duplicate"]:
+                message = "هذا الملف سبق استيراده إلى الجلسة نفسها؛ لم تُنشأ سجلات مكررة."
+            else:
+                message = (
+                    f"تم استيراد {result['asset_count']} أصل و"
+                    f"{result['service_count']} خدمة."
+                )
+            if result["skipped_host_count"]:
+                message += f"\nالأجهزة المستبعدة خارج النطاق أو غير النشطة: {result['skipped_host_count']}."
+            if parsed.warnings:
+                message += "\nملاحظات: " + " ".join(parsed.warnings[:5])
+            self.inventory_status.setText(message)
+            QMessageBox.information(self, "نتيجة الاستيراد", message)
+        except (NmapImportError, StoreError, OSError, ValueError) as exc:
+            QMessageBox.warning(self, "تعذر استيراد الملف", str(exc))
+
     def _build_commands(self) -> QWidget:
         page, layout = _page_container()
         layout.addWidget(_label("مكتبة الأوامر والإرشادات", "SectionTitle"))
@@ -797,6 +983,7 @@ class MainWindow(QMainWindow):
         self._refresh_scope_table()
         self._refresh_sessions_table()
         self._refresh_evidence_sessions()
+        self._refresh_inventory_sessions()
         self._refresh_reports_table()
         self._refresh_diagnostics_table()
 
