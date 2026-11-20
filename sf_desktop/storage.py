@@ -457,8 +457,8 @@ class SFStore:
                     }
 
                 cursor = connection.execute(
-                    "INSERT INTO imports(session_id, source_name, sha256, imported_at, "
-                    "source_type, sha256, imported_at, asset_count, service_count, "
+                    "INSERT INTO imports(session_id, source_name, source_type, sha256, imported_at, "
+                    "asset_count, service_count, "
                     "skipped_host_count, authorization_confirmed, authorization_recorded_at) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (clean_id, clean_source, source_type, digest, now,
