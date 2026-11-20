@@ -113,6 +113,7 @@ def test_report_includes_imported_assets_services_and_provenance(tmp_path):
             "product": "Web",
             "version": "2.0",
         }],
+        authorization_confirmed=True,
     )
     report = generate_session_report(store, session["id"], tmp_path / "out")
     content = report.read_text(encoding="utf-8")
