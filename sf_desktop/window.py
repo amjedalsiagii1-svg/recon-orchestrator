@@ -5,11 +5,13 @@ presented as planned workflow stages and are not wired to the legacy runners.
 """
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -26,8 +28,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from sf_desktop.scope_guard import ScopePolicy, validate_scope_entry
-from sf_desktop.nmap_xml import NmapImportError, parse_nmap_xml_file
+from sf_desktop.scope_guard import validate_scope_entry
+from sf_desktop.local_audit import collect_local_snapshot
 from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.reporting import ReportError, generate_session_report
 from sf_desktop.advisor import SAFE_COMMANDS, SEVERITY_LABELS, recommendations_for_evidence
@@ -159,7 +161,7 @@ class MainWindow(QMainWindow):
         ("النطاق المصرح", 2),
         ("الجلسات", 3),
         ("الأدلة والنتائج", 4),
-        ("الأصول والخدمات", 5),
+        ("التحليل المحلي", 5),
         ("الأوامر والإرشادات", 6),
         ("التقارير", 7),
         ("تشخيص النظام", 8),
@@ -185,7 +187,7 @@ class MainWindow(QMainWindow):
             ("النطاق المصرح", "فحص سياسة النطاق المحلية دون اتصال بالأهداف"),
             ("الجلسات", "إنشاء جلسات محلية وحفظ سجل العمل"),
             ("الأدلة والنتائج", "تجميع السجلات ومراجعتها دون اختلاق استنتاجات"),
-            ("الأصول والخدمات", "استيراد بيانات XML الموجودة والتحقق من انتمائها إلى النطاق"),
+            ("التحليل المحلي", "تحليل معلومات جهاز Kali الحالي بلمسة واحدة ومن دون ملفات"),
             ("الأوامر والإرشادات", "أوامر محلية مع شرحها ومتطلباتها ونتائجها المتوقعة"),
             ("التقارير", "عرض ملفات HTML الموجودة دون فتح أو تعديل محتواها"),
             ("تشخيص النظام", "معلومات محلية عن النظام والاعتماديات المتاحة"),
@@ -696,7 +698,7 @@ class MainWindow(QMainWindow):
     def _build_inventory(self) -> QWidget:
         page, layout = _page_container()
         header = QHBoxLayout()
-        header.addWidget(_label("سجل الأصول والخدمات", "SectionTitle"))
+        header.addWidget(_label("التحليل السريع لجهازك", "SectionTitle"))
         header.addStretch(1)
         self.inventory_session_combo = QComboBox()
         self.inventory_session_combo.setMinimumWidth(260)
@@ -704,35 +706,49 @@ class MainWindow(QMainWindow):
             self._refresh_inventory_tables
         )
         header.addWidget(self.inventory_session_combo)
-        import_button = QPushButton("استيراد Nmap XML محفوظ")
-        import_button.setObjectName("ActionButton")
-        import_button.clicked.connect(self._import_nmap_xml)
-        header.addWidget(import_button)
-        refresh_button = QPushButton("تحديث")
+        self.local_audit_button = QPushButton("ابدأ التحليل السريع")
+        self.local_audit_button.setObjectName("ActionButton")
+        self.local_audit_button.clicked.connect(self._run_local_audit)
+        header.addWidget(self.local_audit_button)
+        refresh_button = QPushButton("تحديث النتائج")
         refresh_button.clicked.connect(self._refresh_inventory_sessions)
         header.addWidget(refresh_button)
         layout.addLayout(header)
-        layout.addWidget(_label(
-            "يستورد SF نتائج XML الموجودة مسبقاً فقط. لا يشغّل Nmap ولا يرسل أي حزم. "
-            "تُقبل العناوين الموجودة داخل النطاق المحلي المهيأ في config/scope.txt فقط.",
+
+        notice = QFrame()
+        notice.setObjectName("Hero")
+        notice_layout = QVBoxLayout(notice)
+        notice_layout.setContentsMargins(18, 14, 18, 14)
+        notice_layout.addWidget(_label("لا تحتاج إلى ملف XML أو إعدادات معقدة", "SectionTitle"))
+        notice_layout.addWidget(_label(
+            "اضغط «ابدأ التحليل السريع». سيقرأ SF معلومات جهاز Kali الحالي فقط: "
+            "واجهات الشبكة وعناوينه والبوابة وDNS ومنافذ الاستماع المحلية. "
+            "لا يرسل حزمًا، ولا يفحص أجهزة أخرى، ولا يحتاج إلى صلاحيات root.",
             "Muted",
         ))
+        layout.addWidget(notice)
 
-        self.inventory_assets_table = QTableWidget(0, 7)
+        self.inventory_context = _label(
+            "لم يبدأ التحليل بعد. اختر جلسة أو اضغط زر التحليل لإنشاء جلسة محلية تلقائياً.",
+            "Muted",
+        )
+        layout.addWidget(self.inventory_context)
+
+        layout.addWidget(_label("جهازك وواجهات الشبكة", "SectionTitle"))
+        self.inventory_assets_table = QTableWidget(0, 6)
         self.inventory_assets_table.setHorizontalHeaderLabels(
-            ["عنوان IP", "اسم المضيف", "MAC", "الشركة", "الحالة", "الخدمات", "مصدر البيانات"]
+            ["عنوان IP المحلي", "اسم الجهاز", "عنوان MAC", "الجهة", "الحالة", "مصدر البيانات"]
         )
         self.inventory_assets_table.setAlternatingRowColors(True)
         self.inventory_assets_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.inventory_assets_table.horizontalHeader().setStretchLastSection(True)
         self.inventory_assets_table.setMaximumHeight(250)
-        layout.addWidget(_label("الأجهزة والأصول", "SectionTitle"))
         layout.addWidget(self.inventory_assets_table)
 
-        layout.addWidget(_label("الخدمات والمنافذ المسجلة", "SectionTitle"))
-        self.inventory_services_table = QTableWidget(0, 8)
+        layout.addWidget(_label("الخدمات التي تستمع على جهازك", "SectionTitle"))
+        self.inventory_services_table = QTableWidget(0, 7)
         self.inventory_services_table.setHorizontalHeaderLabels(
-            ["الأصل", "البروتوكول", "المنفذ", "الحالة", "الخدمة", "المنتج", "الإصدار", "المصدر"]
+            ["عنوان الجهاز", "البروتوكول", "المنفذ", "الحالة المحلية", "التعريف", "تفاصيل الربط", "المصدر"]
         )
         self.inventory_services_table.setAlternatingRowColors(True)
         self.inventory_services_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -753,10 +769,8 @@ class MainWindow(QMainWindow):
         if self.store is not None:
             try:
                 for session in self.store.list_sessions(limit=100):
-                    combo.addItem(
-                        f"{session['name']} · {session['id'][:8]}",
-                        session["id"],
-                    )
+                    state = "مفتوحة" if session["status"] == "open" else "مغلقة"
+                    combo.addItem(f"{session['name']} · {state}", session["id"])
             except (StoreError, OSError) as exc:
                 self.inventory_status.setText(f"تعذر تحميل الجلسات: {exc}")
         if current_id:
@@ -773,120 +787,169 @@ class MainWindow(QMainWindow):
         self.inventory_services_table.setRowCount(0)
         session_id = self.inventory_session_combo.currentData()
         if not session_id or self.store is None:
-            self.inventory_status.setText("أنشئ جلسة أولاً، ثم استورد ملف نتائج محلياً.")
+            self.inventory_status.setText("اضغط «ابدأ التحليل السريع» لبدء أول جلسة.")
             return
         try:
             assets = self.store.list_assets(session_id)
             services = self.store.list_services(session_id)
+            imports = self.store.list_imports(session_id)
+            session = self.store.get_session(session_id)
         except (StoreError, OSError) as exc:
-            self.inventory_status.setText(f"تعذر قراءة سجل الأصول والخدمات: {exc}")
+            self.inventory_status.setText(f"تعذر قراءة النتائج: {exc}")
             return
 
         for asset in assets:
             row = self.inventory_assets_table.rowCount()
             self.inventory_assets_table.insertRow(row)
+            source_label = (
+                "تحليل محلي" if asset.get("source_type") == "local-readonly"
+                else asset["source_name"]
+            )
             values = (
                 asset["ip"], asset["hostname"] or "—", asset["mac"] or "—",
-                asset["vendor"] or "—", asset["state"], str(asset["service_count"]),
-                asset["source_name"],
+                asset["vendor"] or "—", asset["state"], source_label,
             )
             for column, value in enumerate(values):
-                self.inventory_assets_table.setItem(row, column, QTableWidgetItem(str(value)))
+                self.inventory_assets_table.setItem(
+                    row, column, QTableWidgetItem(str(value))
+                )
 
         for service in services:
             row = self.inventory_services_table.rowCount()
             self.inventory_services_table.insertRow(row)
+            source_label = (
+                "تحليل محلي" if service.get("source_type") == "local-readonly"
+                else service["source_name"]
+            )
             values = (
                 service["ip"], service["protocol"], str(service["port"]),
                 service["state"], service["name"] or "—",
-                service["product"] or "—", service["version"] or "—",
-                service["source_name"],
+                service["extra_info"] or "—", source_label,
             )
             for column, value in enumerate(values):
-                self.inventory_services_table.setItem(row, column, QTableWidgetItem(str(value)))
+                self.inventory_services_table.setItem(
+                    row, column, QTableWidgetItem(str(value))
+                )
 
-        imports = self.store.list_imports(session_id)
-        imported_hosts = sum(item["asset_count"] for item in imports)
+        local_imports = [
+            item for item in imports if item.get("source_type") == "local-readonly"
+        ]
+        if local_imports:
+            latest = local_imports[0]
+            self.inventory_context.setText(
+                f"آخر تحليل محلي: {latest['imported_at']} | "
+                f"العناوين المحلية: {len(assets)} | الخدمات المحلية: {len(services)}"
+            )
+        elif session and session["status"] == "closed":
+            self.inventory_context.setText(
+                "هذه الجلسة مغلقة. أنشئ جلسة جديدة لإجراء تحليل محلي."
+            )
+        else:
+            self.inventory_context.setText(
+                "لا توجد نتائج تحليل محلي في هذه الجلسة. اضغط «ابدأ التحليل السريع»."
+            )
         self.inventory_status.setText(
-            f"الأصول الحالية: {len(assets)} | الخدمات الحالية: {len(services)} | "
-            f"عمليات الاستيراد: {len(imports)} | سجلات الأجهزة عبر الملفات: {imported_hosts}"
+            f"العناوين المحلية المسجلة: {len(assets)} | "
+            f"منافذ الاستماع المحلية: {len(services)} | "
+            f"لقطات التحليل: {len(local_imports)}"
         )
 
-    def _import_nmap_xml(self) -> None:
+    def _run_local_audit(self) -> None:
         if self.store is None:
-            QMessageBox.warning(self, "التخزين غير متاح", self._storage_error or "تعذر فتح قاعدة البيانات.")
-            return
-        session_id = self.inventory_session_combo.currentData()
-        if not session_id:
-            QMessageBox.information(self, "اختر جلسة", "أنشئ جلسة أو حدد جلسة مفتوحة أولاً.")
-            return
-        try:
-            session = self.store.get_session(session_id)
-            if session is None or session["status"] != "open":
-                raise StoreError("لا يمكن الاستيراد إلى جلسة غير موجودة أو مغلقة.")
-        except (StoreError, OSError) as exc:
-            QMessageBox.warning(self, "الجلسة غير متاحة", str(exc))
-            return
-
-        scope_values = [entry.value for entry in self._scope_entries if entry.valid]
-        policy = ScopePolicy.from_values(scope_values)
-        if not policy.networks:
             QMessageBox.warning(
-                self, "النطاق غير مهيأ",
-                "لا توجد عناوين محلية مقبولة في config/scope.txt. "
-                "أضف نطاقاً تملكه أو لديك تفويض صريح لتقييمه، ثم أعد المحاولة.",
+                self, "التخزين غير متاح",
+                self._storage_error or "تعذر فتح قاعدة بيانات SF المحلية.",
             )
             return
 
-        filename, _selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "استيراد نتائج Nmap XML محفوظة",
-            str(PROJECT_ROOT),
-            "Nmap XML (*.xml);;XML files (*.xml);;All files (*)",
-        )
-        if not filename:
-            return
-        networks_label = ", ".join(str(network) for network in policy.networks)
-        confirmation = QMessageBox.question(
-            self,
-            "تأكيد صلاحية الاستيراد",
-            "هل تؤكد أن ملف النتائج يخص أجهزة أو شبكة تملكها أو لديك تفويض صريح لتقييمها؟\n\n"
-            f"النطاقات التي سيقبل SF عناوينها: {networks_label}\n\n"
-            "سيقرأ SF الملف محلياً فقط؛ لن يشغّل Nmap ولن يتصل بهذه العناوين.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if confirmation != QMessageBox.StandardButton.Yes:
-            self.inventory_status.setText("تم إلغاء الاستيراد لعدم تأكيد التفويض.")
+        session_id = self.inventory_session_combo.currentData()
+        try:
+            session = self.store.get_session(session_id) if session_id else None
+            if session is None or session["status"] != "open":
+                stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
+                session = self.store.create_session(f"تحليل محلي {stamp}")
+                self._refresh_inventory_sessions()
+                index = self.inventory_session_combo.findData(session["id"])
+                if index >= 0:
+                    self.inventory_session_combo.setCurrentIndex(index)
+                session_id = session["id"]
+        except (StoreError, ValueError, OSError) as exc:
+            QMessageBox.warning(self, "تعذر إنشاء الجلسة", str(exc))
             return
 
+        self.local_audit_button.setEnabled(False)
+        self.local_audit_button.setText("جارٍ تحليل الجهاز...")
         try:
-            parsed = parse_nmap_xml_file(filename, scope=policy)
+            snapshot = collect_local_snapshot()
+            digest = hashlib.sha256(
+                snapshot.canonical_json().encode("utf-8")
+            ).hexdigest()
+            source_name = "قراءة محلية لجهاز Kali"
             result = self.store.import_inventory(
                 session_id,
-                source_name=parsed.source_name,
-                sha256=parsed.sha256,
-                assets=parsed.asset_dicts(),
-                services=parsed.service_dicts(),
-                skipped_host_count=parsed.skipped_host_count,
-                authorization_confirmed=True,
+                source_name=source_name,
+                source_type="local-readonly",
+                sha256=digest,
+                assets=[dict(item) for item in snapshot.assets],
+                services=[dict(item) for item in snapshot.services],
+                skipped_host_count=0,
+                authorization_confirmed=False,
+            )
+
+            interfaces_text = "، ".join(
+                f"{item['name']} ({item['state']})"
+                for item in snapshot.interfaces
+            ) or "لم تتوفر بيانات الواجهات"
+            dns_text = (
+                "، ".join(snapshot.dns_servers)
+                if snapshot.dns_servers else "غير متاح"
+            )
+            gateway_text = snapshot.default_gateway or "لم يُكتشف مسار افتراضي"
+            detail = (
+                f"اسم الجهاز: {snapshot.hostname}\n"
+                f"الواجهات: {interfaces_text}\n"
+                f"البوابة الافتراضية: {gateway_text}\n"
+                f"واجهة المسار الافتراضي: {snapshot.default_interface or 'غير معروفة'}\n"
+                f"خوادم DNS: {dns_text}\n"
+                "النطاق: معلومات الجهاز الحالي فقط؛ لم يتم فحص أجهزة أخرى."
+            )
+            self.store.add_evidence(
+                session_id,
+                source="local-readonly",
+                category="configuration",
+                title="ملخص اتصال جهاز Kali المحلي",
+                detail=detail,
+                confidence=1.0,
+                payload={
+                    "provenance": "local-os-read-only",
+                    "verification_status": "observed-locally",
+                    "interfaces": list(snapshot.interfaces),
+                    "default_gateway": snapshot.default_gateway,
+                    "default_interface": snapshot.default_interface,
+                    "dns_servers": list(snapshot.dns_servers),
+                    "warnings": list(snapshot.warnings),
+                },
             )
             self._refresh_inventory_tables()
+            self._refresh_evidence_sessions()
             if result["duplicate"]:
-                message = "هذا الملف سبق استيراده إلى الجلسة نفسها؛ لم تُنشأ سجلات مكررة."
+                message = "لم تتغير بيانات اللقطة؛ كانت هذه النتائج محفوظة بالفعل."
             else:
                 message = (
-                    f"تم استيراد {result['asset_count']} أصل و"
-                    f"{result['service_count']} خدمة."
+                    f"اكتمل التحليل المحلي.\n"
+                    f"العناوين المحلية: {result['asset_count']}\n"
+                    f"منافذ الاستماع المحلية: {result['service_count']}\n"
+                    f"البوابة: {gateway_text}\nDNS: {dns_text}"
                 )
-            if result["skipped_host_count"]:
-                message += f"\nالأجهزة المستبعدة خارج النطاق أو غير النشطة: {result['skipped_host_count']}."
-            if parsed.warnings:
-                message += "\nملاحظات: " + " ".join(parsed.warnings[:5])
-            self.inventory_status.setText(message)
-            QMessageBox.information(self, "نتيجة الاستيراد", message)
-        except (NmapImportError, StoreError, OSError, ValueError) as exc:
-            QMessageBox.warning(self, "تعذر استيراد الملف", str(exc))
+            if snapshot.warnings:
+                message += "\n\nملاحظات: " + " ".join(snapshot.warnings[:4])
+            self.inventory_status.setText(message.replace("\n", " | "))
+            QMessageBox.information(self, "اكتمل التحليل السريع", message)
+        except (OSError, RuntimeError, ValueError, StoreError) as exc:
+            QMessageBox.warning(self, "تعذر إكمال التحليل المحلي", str(exc))
+        finally:
+            self.local_audit_button.setEnabled(True)
+            self.local_audit_button.setText("ابدأ التحليل السريع")
 
     def _build_commands(self) -> QWidget:
         page, layout = _page_container()
