@@ -74,6 +74,7 @@ def test_inventory_import_is_scoped_deduplicated_and_queryable(tmp_path):
     result = store.import_inventory(
         session["id"], source_name="sample.xml", sha256=digest,
         assets=assets, services=services, skipped_host_count=1,
+        authorization_confirmed=True,
     )
     assert result["duplicate"] is False
     assert len(store.list_assets(session["id"])) == 1
@@ -82,7 +83,7 @@ def test_inventory_import_is_scoped_deduplicated_and_queryable(tmp_path):
 
     duplicate = store.import_inventory(
         session["id"], source_name="renamed.xml", sha256=digest,
-        assets=assets, services=services,
+        assets=assets, services=services, authorization_confirmed=True,
     )
     assert duplicate["duplicate"] is True
     assert len(store.list_assets(session["id"])) == 1
@@ -101,4 +102,22 @@ def test_inventory_rejects_closed_session_and_invalid_data(tmp_path):
         store.import_inventory(
             session["id"], source_name="x.xml", sha256=digest,
             assets=[{"ip": "192.168.8.10"}], services=[],
+            authorization_confirmed=True,
+        )
+
+
+
+def test_inventory_import_requires_explicit_authorization_confirmation(tmp_path):
+    import hashlib
+    import pytest
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("تأكيد مطلوب")
+    with pytest.raises(ValueError, match="تأكيد صريح"):
+        store.import_inventory(
+            session["id"],
+            source_name="source.xml",
+            sha256=hashlib.sha256(b"source").hexdigest(),
+            assets=[{"ip": "192.168.8.10"}],
+            services=[],
         )

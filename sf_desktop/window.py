@@ -846,6 +846,20 @@ class MainWindow(QMainWindow):
         )
         if not filename:
             return
+        networks_label = ", ".join(str(network) for network in policy.networks)
+        confirmation = QMessageBox.question(
+            self,
+            "تأكيد صلاحية الاستيراد",
+            "هل تؤكد أن ملف النتائج يخص أجهزة أو شبكة تملكها أو لديك تفويض صريح لتقييمها؟\n\n"
+            f"النطاقات التي سيقبل SF عناوينها: {networks_label}\n\n"
+            "سيقرأ SF الملف محلياً فقط؛ لن يشغّل Nmap ولن يتصل بهذه العناوين.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            self.inventory_status.setText("تم إلغاء الاستيراد لعدم تأكيد التفويض.")
+            return
+
         try:
             parsed = parse_nmap_xml_file(filename, scope=policy)
             result = self.store.import_inventory(
@@ -855,6 +869,7 @@ class MainWindow(QMainWindow):
                 assets=parsed.asset_dicts(),
                 services=parsed.service_dicts(),
                 skipped_host_count=parsed.skipped_host_count,
+                authorization_confirmed=True,
             )
             self._refresh_inventory_tables()
             if result["duplicate"]:

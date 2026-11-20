@@ -98,6 +98,7 @@ def test_inventory_view_lists_imported_assets_and_services(qapp, tmp_path, monke
                 "product": "Example Server",
                 "version": "1.2",
             }],
+            authorization_confirmed=True,
         )
         window._refresh_inventory_sessions()
         index = window.inventory_session_combo.findData(session["id"])

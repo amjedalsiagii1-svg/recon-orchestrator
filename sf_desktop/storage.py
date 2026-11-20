@@ -108,6 +108,9 @@ class SFStore:
                     asset_count INTEGER NOT NULL,
                     service_count INTEGER NOT NULL,
                     skipped_host_count INTEGER NOT NULL,
+                    authorization_confirmed INTEGER NOT NULL DEFAULT 0
+                        CHECK(authorization_confirmed IN (0, 1)),
+                    authorization_recorded_at TEXT,
                     UNIQUE(session_id, sha256),
                     FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
                 );
@@ -154,6 +157,20 @@ class SFStore:
                     ON services(asset_id, protocol, port);
                 """
             )
+            # Forward-compatible additive migration for databases created by
+            # an earlier SF development build.
+            import_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(imports)")
+            }
+            if "authorization_confirmed" not in import_columns:
+                connection.execute(
+                    "ALTER TABLE imports ADD COLUMN authorization_confirmed "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            if "authorization_recorded_at" not in import_columns:
+                connection.execute(
+                    "ALTER TABLE imports ADD COLUMN authorization_recorded_at TEXT"
+                )
         if os.name == "posix" and self.path.exists():
             self.path.chmod(0o600)
 
@@ -299,8 +316,13 @@ class SFStore:
         assets: list[dict[str, Any]],
         services: list[dict[str, Any]],
         skipped_host_count: int = 0,
+        authorization_confirmed: bool = False,
     ) -> dict[str, Any]:
         """Atomically import already-collected, scope-validated inventory."""
+        if authorization_confirmed is not True:
+            raise ValueError(
+                "يلزم تأكيد صريح بأنك تملك النطاق أو لديك تفويض مكتوب لتقييمه"
+            )
         import ipaddress
         import re
 
@@ -401,7 +423,8 @@ class SFStore:
                     raise StoreError("لا يمكن استيراد بيانات إلى جلسة مغلقة")
 
                 duplicate = connection.execute(
-                    "SELECT id, asset_count, service_count, skipped_host_count "
+                    "SELECT id, asset_count, service_count, skipped_host_count, "
+                    "authorization_confirmed, authorization_recorded_at "
                     "FROM imports WHERE session_id=? AND sha256=?",
                     (clean_id, digest),
                 ).fetchone()
@@ -412,15 +435,18 @@ class SFStore:
                         "asset_count": int(duplicate["asset_count"]),
                         "service_count": int(duplicate["service_count"]),
                         "skipped_host_count": int(duplicate["skipped_host_count"]),
+                        "authorization_confirmed": bool(duplicate["authorization_confirmed"]),
+                        "authorization_recorded_at": duplicate["authorization_recorded_at"],
                         "source_name": clean_source,
                     }
 
                 cursor = connection.execute(
                     "INSERT INTO imports(session_id, source_name, sha256, imported_at, "
-                    "asset_count, service_count, skipped_host_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "asset_count, service_count, skipped_host_count, "
+                    "authorization_confirmed, authorization_recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
                     (clean_id, clean_source, digest, now, len(normalized_assets),
-                     len(normalized_services), skipped_host_count),
+                     len(normalized_services), skipped_host_count, now),
                 )
                 import_id = int(cursor.lastrowid)
                 asset_ids: dict[str, int] = {}
@@ -482,6 +508,8 @@ class SFStore:
                 "asset_count": len(normalized_assets),
                 "service_count": len(normalized_services),
                 "skipped_host_count": skipped_host_count,
+                "authorization_confirmed": True,
+                "authorization_recorded_at": now,
                 "source_name": clean_source,
             }
         except sqlite3.IntegrityError as exc:
@@ -528,7 +556,8 @@ class SFStore:
             with self._connect() as connection:
                 rows = connection.execute(
                     "SELECT id, source_name, sha256, imported_at, asset_count, "
-                    "service_count, skipped_host_count FROM imports "
+                    "service_count, skipped_host_count, authorization_confirmed, "
+                    "authorization_recorded_at FROM imports "
                     "WHERE session_id=? ORDER BY imported_at DESC",
                     (clean_id,),
                 ).fetchall()
