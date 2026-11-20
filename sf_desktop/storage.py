@@ -103,6 +103,8 @@ class SFStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
                     source_name TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'file'
+                        CHECK(source_type IN ('file', 'local-readonly')),
                     sha256 TEXT NOT NULL,
                     imported_at TEXT NOT NULL,
                     asset_count INTEGER NOT NULL,
@@ -162,6 +164,11 @@ class SFStore:
             import_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(imports)")
             }
+            if "source_type" not in import_columns:
+                connection.execute(
+                    "ALTER TABLE imports ADD COLUMN source_type "
+                    "TEXT NOT NULL DEFAULT 'file'"
+                )
             if "authorization_confirmed" not in import_columns:
                 connection.execute(
                     "ALTER TABLE imports ADD COLUMN authorization_confirmed "
@@ -317,12 +324,17 @@ class SFStore:
         services: list[dict[str, Any]],
         skipped_host_count: int = 0,
         authorization_confirmed: bool = False,
+        source_type: str = "file",
     ) -> dict[str, Any]:
-        """Atomically import already-collected, scope-validated inventory."""
-        if authorization_confirmed is not True:
+        """Store previously collected inventory with explicit provenance."""
+        if source_type not in {"file", "local-readonly"}:
+            raise ValueError("نوع مصدر البيانات غير مدعوم")
+        if source_type == "file" and authorization_confirmed is not True:
             raise ValueError(
                 "يلزم تأكيد صريح بأنك تملك النطاق أو لديك تفويض مكتوب لتقييمه"
             )
+        if source_type == "local-readonly" and authorization_confirmed:
+            raise ValueError("التحليل المحلي لا يستخدم تأكيد تفويض شبكة")
         import ipaddress
         import re
 
@@ -377,7 +389,10 @@ class SFStore:
 
         normalized_services: list[dict[str, Any]] = []
         seen_services: set[tuple[str, str, int]] = set()
-        allowed_states = {"open", "closed", "filtered", "open|filtered", "unfiltered", "unknown"}
+        allowed_states = {
+            "open", "closed", "filtered", "open|filtered", "unfiltered",
+            "unknown", "listening", "bound",
+        }
         for item in services:
             if not isinstance(item, dict):
                 raise ValueError("بنية الخدمة المستوردة غير صالحة")
@@ -424,7 +439,7 @@ class SFStore:
 
                 duplicate = connection.execute(
                     "SELECT id, asset_count, service_count, skipped_host_count, "
-                    "authorization_confirmed, authorization_recorded_at "
+                    "authorization_confirmed, authorization_recorded_at, source_type "
                     "FROM imports WHERE session_id=? AND sha256=?",
                     (clean_id, digest),
                 ).fetchone()
@@ -437,16 +452,18 @@ class SFStore:
                         "skipped_host_count": int(duplicate["skipped_host_count"]),
                         "authorization_confirmed": bool(duplicate["authorization_confirmed"]),
                         "authorization_recorded_at": duplicate["authorization_recorded_at"],
+                        "source_type": duplicate["source_type"],
                         "source_name": clean_source,
                     }
 
                 cursor = connection.execute(
                     "INSERT INTO imports(session_id, source_name, sha256, imported_at, "
-                    "asset_count, service_count, skipped_host_count, "
-                    "authorization_confirmed, authorization_recorded_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
-                    (clean_id, clean_source, digest, now, len(normalized_assets),
-                     len(normalized_services), skipped_host_count, now),
+                    "source_type, sha256, imported_at, asset_count, service_count, "
+                    "skipped_host_count, authorization_confirmed, authorization_recorded_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (clean_id, clean_source, source_type, digest, now,
+                     len(normalized_assets), len(normalized_services), skipped_host_count,
+                     1 if source_type == "file" else 0, now if source_type == "file" else None),
                 )
                 import_id = int(cursor.lastrowid)
                 asset_ids: dict[str, int] = {}
@@ -508,8 +525,9 @@ class SFStore:
                 "asset_count": len(normalized_assets),
                 "service_count": len(normalized_services),
                 "skipped_host_count": skipped_host_count,
-                "authorization_confirmed": True,
-                "authorization_recorded_at": now,
+                "authorization_confirmed": source_type == "file",
+                "authorization_recorded_at": now if source_type == "file" else None,
+                "source_type": source_type,
                 "source_name": clean_source,
             }
         except sqlite3.IntegrityError as exc:
@@ -555,7 +573,7 @@ class SFStore:
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    "SELECT id, source_name, sha256, imported_at, asset_count, "
+                    "SELECT id, source_name, source_type, sha256, imported_at, asset_count, "
                     "service_count, skipped_host_count, authorization_confirmed, "
                     "authorization_recorded_at FROM imports "
                     "WHERE session_id=? ORDER BY imported_at DESC",
