@@ -92,13 +92,14 @@ def _render(
     import_rows = "".join(
         "<tr>"
         f"<td>{_e(item.get('source_name'))}</td><td>{_e(item.get('imported_at'))}</td>"
+        f"<td>{'تحليل محلي' if item.get('source_type') == 'local-readonly' else 'ملف نتائج'}</td>"
         f"<td>{_e(item.get('asset_count'))}</td><td>{_e(item.get('service_count'))}</td>"
         f"<td>{_e(item.get('skipped_host_count'))}</td>"
-        f"<td>{'مؤكد' if item.get('authorization_confirmed') else 'غير مؤكد'}</td>"
-        f"<td>{_e(item.get('authorization_recorded_at'))}</td>"
+        f"<td>{'لا ينطبق؛ جهازك المحلي' if item.get('source_type') == 'local-readonly' else ('مؤكد' if item.get('authorization_confirmed') else 'غير مؤكد')}</td>"
+        f"<td>{_e(item.get('authorization_recorded_at')) if item.get('authorization_recorded_at') else '—'}</td>"
         f"<td><code>{_e(item.get('sha256'))}</code></td></tr>"
         for item in imports
-    ) or "<tr><td colspan='8' class='empty'>لا توجد ملفات نتائج مستوردة.</td></tr>"
+    ) or "<tr><td colspan='9' class='empty'>لا توجد مصادر بيانات مسجلة.</td></tr>"
 
     severity = severity_counts(evidence)
     severity_labels = {
@@ -221,7 +222,7 @@ footer {{ color:var(--muted); text-align:center; font-size:12px; padding:18px; }
 <section class="panel">
   <h2>سجل ملفات الاستيراد</h2>
   <table>
-    <thead><tr><th>الملف</th><th>تاريخ الاستيراد</th><th>الأصول في الملف</th><th>الخدمات في الملف</th><th>الأجهزة المستبعدة</th><th>تأكيد التفويض</th><th>وقت التأكيد</th><th>SHA-256</th></tr></thead>
+    <thead><tr><th>المصدر</th><th>التاريخ</th><th>نوع المصدر</th><th>الأصول</th><th>الخدمات</th><th>المستبعدة</th><th>تأكيد التفويض</th><th>وقت التأكيد</th><th>SHA-256</th></tr></thead>
     <tbody>{import_rows}</tbody>
   </table>
 </section>

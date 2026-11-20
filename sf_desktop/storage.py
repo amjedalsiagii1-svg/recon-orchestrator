@@ -541,7 +541,7 @@ class SFStore:
             with self._connect() as connection:
                 rows = connection.execute(
                     "SELECT a.id, a.session_id, a.ip, a.hostname, a.mac, a.vendor, "
-                    "a.state, a.first_seen, a.last_seen, i.source_name, "
+                    "a.state, a.first_seen, a.last_seen, i.source_name, i.source_type, "
                     "(SELECT COUNT(*) FROM services s WHERE s.asset_id=a.id) AS service_count "
                     "FROM assets a JOIN imports i ON i.id=a.source_import_id "
                     "WHERE a.session_id=? ORDER BY a.ip",
@@ -558,7 +558,7 @@ class SFStore:
                 rows = connection.execute(
                     "SELECT s.id, a.ip, a.hostname, s.protocol, s.port, s.state, "
                     "s.name, s.product, s.version, s.extra_info, s.first_seen, "
-                    "s.last_seen, i.source_name "
+                    "s.last_seen, i.source_name, i.source_type "
                     "FROM services s JOIN assets a ON a.id=s.asset_id "
                     "JOIN imports i ON i.id=s.source_import_id "
                     "WHERE a.session_id=? ORDER BY a.ip, s.protocol, s.port",
