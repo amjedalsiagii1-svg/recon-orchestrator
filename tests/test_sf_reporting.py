@@ -86,3 +86,38 @@ def test_report_contains_explainable_guidance_and_safe_commands(tmp_path):
     assert "ماذا يفعل؟" in content
     assert "unverified" in content  # user-entered evidence remains explicitly unverified
     assert "لا تُعرض نتائج فحص لم تُنفذ" in content
+
+
+def test_report_includes_imported_assets_services_and_provenance(tmp_path):
+    import hashlib
+
+    store = SFStore(tmp_path / "sf.sqlite3")
+    session = store.create_session("تقرير أصول")
+    store.import_inventory(
+        session["id"],
+        source_name="inventory.xml",
+        sha256=hashlib.sha256(b"inventory").hexdigest(),
+        assets=[{
+            "ip": "192.168.8.22",
+            "hostname": "asset.local",
+            "mac": "aa:bb:cc:dd:ee:22",
+            "vendor": "Example",
+            "state": "up",
+        }],
+        services=[{
+            "ip": "192.168.8.22",
+            "protocol": "tcp",
+            "port": 443,
+            "state": "open",
+            "name": "https",
+            "product": "Web",
+            "version": "2.0",
+        }],
+    )
+    report = generate_session_report(store, session["id"], tmp_path / "out")
+    content = report.read_text(encoding="utf-8")
+    assert "192.168.8.22" in content
+    assert "asset.local" in content
+    assert "inventory.xml" in content
+    assert "Web" in content
+    assert "سجل ملفات الاستيراد" in content
