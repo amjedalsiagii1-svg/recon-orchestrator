@@ -1,5 +1,21 @@
 # Changelog
 
+## [SF Desktop 0.3.0] — 2026-11-20
+
+### Added
+- Arabic desktop workspace for sessions, evidence, recommendations, and local command guidance.
+- Offline import of existing Nmap XML files with strict local-scope filtering.
+- Asset and service inventory stored in SQLite with source-file SHA-256 deduplication.
+- Explicit authorization confirmation recorded with every inventory import.
+- Asset, service, import provenance, and authorization details included in the standalone HTML session report.
+- XML size, host-count, and service-count limits; DTD and ENTITY declarations rejected.
+
+### Quality
+- 26 foundation tests pass on Python 3.11 and 3.12.
+- 7 headless Qt integration tests pass.
+- Existing main branch remains unchanged.
+
+
 ## [0.6.0] — 2026-10-25
 
 ### Added

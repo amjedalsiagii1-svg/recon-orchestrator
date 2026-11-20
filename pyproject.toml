@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recon-orchestrator"
-version = "0.7.1"
+version = "0.8.0"
 description = "SF — Arabic desktop security assessment platform with a modular analysis core"
 readme = "README.md"
 requires-python = ">=3.11"

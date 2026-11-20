@@ -18,7 +18,7 @@ from sf_desktop.environment import PROJECT_ROOT
 from sf_desktop.storage import SFStore, StoreError
 from sf_desktop.advisor import commands_for_report, recommendations_for_evidence, severity_counts
 
-REPORT_VERSION = "0.1"
+REPORT_VERSION = "0.2"
 MAX_REPORT_EVIDENCE = 5000
 
 
